@@ -8,7 +8,7 @@
 - [x] Add seeders for users, positions, and candidates
 
 ## Phase 2: Authentication and Admin Core
-- [ ] Install auth scaffolding (Laravel Breeze)
+- [x] Install auth scaffolding (Laravel Breeze)
 - [x] Add adviser-only middleware
 - [x] Build CRUD for positions and candidates
 
