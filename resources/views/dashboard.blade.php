@@ -9,7 +9,16 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
             <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                 <div class="p-6 text-gray-900">
-                    {{ __("You're logged in!") }}
+                        @if (auth()->user()?->isAdviser())
+                            <p class="mb-4">Adviser access is active.</p>
+                            <div class="flex gap-3 flex-wrap">
+                                <a href="{{ route('admin.dashboard') }}" class="underline">Open Admin Dashboard</a>
+                                <a href="{{ route('positions.index') }}" class="underline">Manage Positions</a>
+                                <a href="{{ route('candidates.index') }}" class="underline">Manage Candidates</a>
+                            </div>
+                        @else
+                            {{ __("You're logged in!") }}
+                        @endif
                 </div>
             </div>
         </div>
