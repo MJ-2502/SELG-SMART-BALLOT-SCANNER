@@ -11,6 +11,7 @@
 - [x] Install auth scaffolding (Laravel Breeze)
 - [x] Add adviser-only middleware
 - [x] Build CRUD for positions and candidates
+- [x] Build adviser-only user account CRUD
 
 ## Phase 3: Physical Ballot Design
 - [ ] Finalize ballot paper format (A4/Letter)
