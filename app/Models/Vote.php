@@ -14,7 +14,15 @@ class Vote extends Model
         'ballot_id',
         'position_id',
         'candidate_id',
+        'is_valid',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_valid' => 'boolean',
+        ];
+    }
 
     public function ballot(): BelongsTo
     {

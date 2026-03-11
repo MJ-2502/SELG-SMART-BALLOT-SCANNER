@@ -17,6 +17,7 @@ class Ballot extends Model
         'image_path',
         'scanned_at',
         'scanned_by',
+        'status',
     ];
 
     protected function casts(): array
