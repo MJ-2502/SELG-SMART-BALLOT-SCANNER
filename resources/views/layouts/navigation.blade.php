@@ -25,6 +25,9 @@
                         <x-nav-link :href="route('candidates.index')" :active="request()->routeIs('candidates.*')">
                             {{ __('Candidates') }}
                         </x-nav-link>
+                        <x-nav-link :href="route('admin.ballot-layout.index')" :active="request()->routeIs('admin.ballot-layout.*')">
+                            {{ __('Ballot Layout') }}
+                        </x-nav-link>
                     @endif
                 </div>
             </div>
@@ -90,6 +93,9 @@
                 </x-responsive-nav-link>
                 <x-responsive-nav-link :href="route('candidates.index')" :active="request()->routeIs('candidates.*')">
                     {{ __('Candidates') }}
+                </x-responsive-nav-link>
+                <x-responsive-nav-link :href="route('admin.ballot-layout.index')" :active="request()->routeIs('admin.ballot-layout.*')">
+                    {{ __('Ballot Layout') }}
                 </x-responsive-nav-link>
             @endif
         </div>

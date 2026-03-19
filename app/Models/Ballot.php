@@ -12,6 +12,8 @@ class Ballot extends Model
     use HasFactory;
 
     protected $fillable = [
+        'election_id',
+        'ballot_number',
         'uuid',
         'image_hash',
         'image_path',
@@ -23,8 +25,14 @@ class Ballot extends Model
     protected function casts(): array
     {
         return [
+            'ballot_number' => 'integer',
             'scanned_at' => 'datetime',
         ];
+    }
+
+    public function election(): BelongsTo
+    {
+        return $this->belongsTo(Election::class);
     }
 
     public function scanner(): BelongsTo

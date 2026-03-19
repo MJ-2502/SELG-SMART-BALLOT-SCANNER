@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CandidateController;
+use App\Http\Controllers\BallotLayoutController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserController;
@@ -31,6 +32,10 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
     Route::resource('users', UserController::class)->except(['show']);
     Route::resource('positions', PositionController::class)->except(['show']);
     Route::resource('candidates', CandidateController::class)->except(['show']);
+
+    Route::get('/admin/ballot-layout', [BallotLayoutController::class, 'index'])->name('admin.ballot-layout.index');
+    Route::post('/admin/ballot-layout/generate', [BallotLayoutController::class, 'generate'])->name('admin.ballot-layout.generate');
+    Route::get('/admin/ballot-layout/print', [BallotLayoutController::class, 'print'])->name('admin.ballot-layout.print');
 });
 
 Route::middleware('auth')->group(function () {
