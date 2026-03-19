@@ -8,6 +8,7 @@
         <a class="btn btn-primary" href="{{ route('users.index') }}">Manage Users</a>
         <a class="btn btn-primary" href="{{ route('positions.index') }}">Manage Positions</a>
         <a class="btn btn-primary" href="{{ route('candidates.index') }}">Manage Candidates</a>
+        <a class="btn btn-primary" href="{{ route('admin.ballot-layout.index') }}">Ballot Layout</a>
     </div>
 </div>
 @endsection
