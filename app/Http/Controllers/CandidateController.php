@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreCandidateRequest;
+use App\Http\Requests\StorePartylistCandidatesRequest;
 use App\Http\Requests\UpdateCandidateRequest;
 use App\Models\Candidate;
 use App\Models\Position;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class CandidateController extends Controller
@@ -31,6 +33,16 @@ class CandidateController extends Controller
         return view('admin.candidates.create', compact('positions'));
     }
 
+    public function createPartylist(): View
+    {
+        $positions = Position::query()
+            ->orderBy('display_order')
+            ->orderBy('name')
+            ->get();
+
+        return view('admin.candidates.create-partylist', compact('positions'));
+    }
+
     public function store(StoreCandidateRequest $request): RedirectResponse
     {
         Candidate::create([
@@ -43,6 +55,45 @@ class CandidateController extends Controller
         return redirect()
             ->route('candidates.index')
             ->with('status', 'Candidate created successfully.');
+    }
+
+    public function storePartylist(StorePartylistCandidatesRequest $request): RedirectResponse
+    {
+        $party = trim((string) $request->input('party'));
+        $isActive = (bool) $request->boolean('is_active', true);
+        $entries = collect($request->input('entries', []))
+            ->map(fn ($name) => trim((string) $name))
+            ->filter(fn ($name) => $name !== '');
+
+        $result = DB::transaction(function () use ($entries, $party, $isActive) {
+            $created = 0;
+            $updated = 0;
+
+            foreach ($entries as $positionId => $candidateName) {
+                $candidate = Candidate::updateOrCreate(
+                    [
+                        'position_id' => (int) $positionId,
+                        'name' => $candidateName,
+                    ],
+                    [
+                        'party' => $party,
+                        'is_active' => $isActive,
+                    ],
+                );
+
+                if ($candidate->wasRecentlyCreated) {
+                    $created++;
+                } else {
+                    $updated++;
+                }
+            }
+
+            return ['created' => $created, 'updated' => $updated];
+        });
+
+        return redirect()
+            ->route('candidates.index')
+            ->with('status', "Partylist saved. Created: {$result['created']}, Updated: {$result['updated']}.");
     }
 
     public function edit(Candidate $candidate): View

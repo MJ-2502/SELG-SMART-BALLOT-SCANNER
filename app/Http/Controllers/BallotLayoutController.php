@@ -33,6 +33,8 @@ class BallotLayoutController extends Controller
     public function generate(StoreBallotGenerationRequest $request): RedirectResponse
     {
         $validated = $request->validated();
+        $perSheet = (int) ($validated['per_sheet'] ?? 1);
+        $scalePercent = (int) ($validated['scale_percent'] ?? 100);
 
         $result = DB::transaction(function () use ($validated) {
             $election = Election::query()
@@ -71,7 +73,11 @@ class BallotLayoutController extends Controller
         });
 
         return redirect()
-            ->route('admin.ballot-layout.print', ['election' => $result['election']->id])
+            ->route('admin.ballot-layout.print', [
+                'election' => $result['election']->id,
+                'per_sheet' => $perSheet,
+                'scale_percent' => $scalePercent,
+            ])
             ->with(
                 'status',
                 $result['generated'] > 0
@@ -84,7 +90,12 @@ class BallotLayoutController extends Controller
     {
         $validated = $request->validate([
             'election' => ['required', 'exists:elections,id'],
+            'per_sheet' => ['nullable', 'integer', 'in:1,2,4'],
+            'scale_percent' => ['nullable', 'integer', 'min:40', 'max:100'],
         ]);
+
+        $perSheet = (int) ($validated['per_sheet'] ?? 1);
+        $scalePercent = (int) ($validated['scale_percent'] ?? 100);
 
         $election = Election::query()->findOrFail((int) $validated['election']);
 
@@ -104,6 +115,6 @@ class BallotLayoutController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('admin.ballot-layout.print', compact('election', 'ballots', 'positions'));
+        return view('admin.ballot-layout.print', compact('election', 'ballots', 'positions', 'perSheet', 'scalePercent'));
     }
 }

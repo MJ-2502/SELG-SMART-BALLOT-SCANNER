@@ -4,7 +4,10 @@
 <div class="card">
     <div class="actions mb-12">
         <h1 style="margin:0;">Candidates</h1>
-        <a class="btn btn-primary" href="{{ route('candidates.create') }}">Add Candidate</a>
+        <div style="display:flex; gap:8px;">
+            <a class="btn btn-primary" href="{{ route('candidates.create') }}">Add Candidate</a>
+            <a class="btn btn-muted" href="{{ route('candidates.partylist.create') }}">Add Partylist</a>
+        </div>
     </div>
 
     <table>

@@ -31,6 +31,8 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
 
     Route::resource('users', UserController::class)->except(['show']);
     Route::resource('positions', PositionController::class)->except(['show']);
+    Route::get('candidates/partylist/create', [CandidateController::class, 'createPartylist'])->name('candidates.partylist.create');
+    Route::post('candidates/partylist', [CandidateController::class, 'storePartylist'])->name('candidates.partylist.store');
     Route::resource('candidates', CandidateController::class)->except(['show']);
 
     Route::get('/admin/ballot-layout', [BallotLayoutController::class, 'index'])->name('admin.ballot-layout.index');
