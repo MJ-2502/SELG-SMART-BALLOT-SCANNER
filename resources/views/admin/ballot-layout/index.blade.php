@@ -147,8 +147,8 @@
                 previewSheet.style.gridTemplateColumns = '1fr 1fr';
                 previewSheet.style.gridTemplateRows = '1fr 1fr';
             } else if (perSheet === 2) {
-                previewSheet.style.gridTemplateColumns = '1fr';
-                previewSheet.style.gridTemplateRows = '1fr 1fr';
+                previewSheet.style.gridTemplateColumns = '1fr 1fr';
+                previewSheet.style.gridTemplateRows = '1fr';
             } else {
                 previewSheet.style.gridTemplateColumns = '1fr';
                 previewSheet.style.gridTemplateRows = '1fr';

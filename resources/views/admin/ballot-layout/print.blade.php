@@ -13,6 +13,17 @@
         default => 1,
     };
     $contentScale = max(0.55, min(1, $scale * $densityBySheet));
+    $positionCount = $positions->count();
+    $candidateCounts = $positions->map(fn ($position) => $position->candidates->count());
+    $maxCandidatesPerPosition = (int) ($candidateCounts->max() ?? 0);
+    $totalCandidates = (int) $candidateCounts->sum();
+    $densityMode = match (true) {
+        $maxCandidatesPerPosition >= 14 || $totalCandidates >= 50 || $positionCount >= 7 => 'ultra',
+        $maxCandidatesPerPosition >= 9 || $totalCandidates >= 32 || $positionCount >= 5 => 'dense',
+        default => 'normal',
+    };
+    $denseContentScale = max(0.5, min(1, $contentScale * 0.88));
+    $ultraContentScale = max(0.45, min(1, $contentScale * 0.78));
     $sheets = $ballots->chunk((int) $perSheet);
 @endphp
 
@@ -31,10 +42,12 @@
             --paper-width-mm: {{ $paperWidthMm }};
             --paper-height-mm: {{ $paperHeightMm }};
             --ballot-scale: {{ $scale }};
+            --base-content-scale: {{ $contentScale }};
             --content-scale: {{ $contentScale }};
             --text-color: #111827;
             --muted-color: #6b7280;
             --line-color: #d1d5db;
+            --font-scale: 1.2;
         }
 
         @page {
@@ -49,6 +62,14 @@
             font-family: Arial, sans-serif;
             color: var(--text-color);
             background: #f3f4f6;
+        }
+
+        body.density-dense {
+            --content-scale: {{ $denseContentScale }};
+        }
+
+        body.density-ultra {
+            --content-scale: {{ $ultraContentScale }};
         }
 
         .toolbar {
@@ -109,8 +130,8 @@
         }
 
         .sheet.per-2 {
-            grid-template-columns: 1fr;
-            grid-template-rows: repeat(2, 1fr);
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: 1fr;
         }
 
         .sheet.per-4 {
@@ -153,114 +174,204 @@
         .marker.bl { bottom: var(--marker-offset); left: var(--marker-offset); }
         .marker.br { bottom: var(--marker-offset); right: var(--marker-offset); }
 
-        .header {
+        .official-ballot {
+            border: 1.5px solid #111827;
+            display: flex;
+            flex-direction: column;
+            background: #ffffff;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .ballot-main {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            border-bottom: 1.5px solid #111827;
+        }
+
+        .ballot-top-number {
+            border-bottom: 1px solid #111827;
             text-align: center;
-            margin-bottom: calc(8px * var(--content-scale));
-            border-bottom: 2px solid #111827;
-            padding-bottom: calc(6px * var(--content-scale));
-        }
-
-        .school-name {
-            font-size: clamp(11px, calc(18px * var(--content-scale)), 18px);
             font-weight: 700;
-            margin: 0;
+            padding: calc(3px * var(--content-scale)) calc(5px * var(--content-scale));
+            font-size: clamp(calc(8px * var(--font-scale)), calc(11px * var(--content-scale) * var(--font-scale)), calc(11px * var(--font-scale)));
         }
 
-        .header-meta {
-            margin-top: calc(3px * var(--content-scale));
-            font-size: clamp(8px, calc(12px * var(--content-scale)), 12px);
-            color: var(--muted-color);
+        .ballot-head {
+            display: grid;
+            grid-template-columns: minmax(16mm, 22mm) 1fr;
+            border-bottom: 1px solid #111827;
+            min-height: calc(18mm * var(--content-scale));
         }
 
-        .ballot-number {
-            margin-top: calc(6px * var(--content-scale));
-            display: inline-block;
-            border: 1px solid #111827;
-            padding: calc(3px * var(--content-scale)) calc(7px * var(--content-scale));
+        .official-tag {
+            border-right: 1px solid #111827;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-size: clamp(calc(7px * var(--font-scale)), calc(9px * var(--content-scale) * var(--font-scale)), calc(9px * var(--font-scale)));
             font-weight: 700;
-            font-size: clamp(8px, calc(13px * var(--content-scale)), 13px);
-            letter-spacing: 0.05em;
+            line-height: 1.2;
+            padding: calc(4px * var(--content-scale));
         }
 
-        .instructions {
-            margin: calc(4px * var(--content-scale)) 0 calc(8px * var(--content-scale));
-            padding: calc(6px * var(--content-scale));
-            border: 1px solid var(--line-color);
-            border-radius: 6px;
-            font-size: clamp(8px, calc(12px * var(--content-scale)), 12px);
-            background: #f9fafb;
+        .election-meta {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: calc(4px * var(--content-scale));
+            gap: calc(1px * var(--content-scale));
+        }
+
+        .election-title {
+            font-size: clamp(calc(8px * var(--font-scale)), calc(11px * var(--content-scale) * var(--font-scale)), calc(11px * var(--font-scale)));
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .election-subtext {
+            font-size: clamp(calc(7px * var(--font-scale)), calc(9px * var(--content-scale) * var(--font-scale)), calc(9px * var(--font-scale)));
+            line-height: 1.2;
+        }
+
+        .instruction-line {
+            border-bottom: 1px solid #111827;
+            color: #b91c1c;
+            font-size: clamp(calc(7px * var(--font-scale)), calc(9px * var(--content-scale) * var(--font-scale)), calc(9px * var(--font-scale)));
+            font-weight: 700;
+            padding: calc(3px * var(--content-scale)) calc(5px * var(--content-scale));
+            text-align: center;
         }
 
         .positions-grid {
             flex: 1;
             min-height: 0;
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: calc(6px * var(--content-scale));
-            align-content: start;
-        }
-
-        .sheet.per-4 .positions-grid {
-            grid-template-columns: 1fr 1fr;
-            gap: calc(5px * var(--content-scale));
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
         .position-block {
-            border: 1px solid var(--line-color);
-            border-radius: 8px;
-            overflow: hidden;
+            border-bottom: 1px solid #111827;
             background: #fff;
+        }
+
+        .position-block:last-child {
+            border-bottom: 0;
         }
 
         .position-title {
             margin: 0;
-            padding: calc(6px * var(--content-scale)) calc(8px * var(--content-scale));
-            font-size: clamp(8px, calc(13px * var(--content-scale)), 13px);
+            padding: calc(3px * var(--content-scale)) calc(5px * var(--content-scale));
+            font-size: clamp(calc(7px * var(--font-scale)), calc(9px * var(--content-scale) * var(--font-scale)), calc(9px * var(--font-scale)));
             font-weight: 700;
-            background: #f3f4f6;
-            border-bottom: 1px solid var(--line-color);
+            background: #efefef;
+            border-bottom: 1px solid #111827;
             text-transform: uppercase;
+        }
+
+        .candidate-list {
+            padding: calc(2px * var(--content-scale)) calc(5px * var(--content-scale));
         }
 
         .candidate-row {
             display: grid;
-            grid-template-columns: var(--bubble-size) 1fr;
-            gap: calc(8px * var(--content-scale));
-            align-items: center;
-            padding: calc(5px * var(--content-scale)) calc(8px * var(--content-scale));
-            border-bottom: 1px dashed #e5e7eb;
-            min-height: calc(6mm * var(--content-scale));
-        }
-
-        .candidate-row:last-child {
-            border-bottom: 0;
+            grid-template-columns: calc(4mm * var(--content-scale)) 1fr;
+            gap: calc(3px * var(--content-scale));
+            align-items: start;
+            padding: calc(1px * var(--content-scale)) 0;
+            min-height: calc(4mm * var(--content-scale));
         }
 
         .bubble {
-            width: var(--bubble-size);
-            height: var(--bubble-size);
-            border: 1.5px solid #111827;
+            width: calc(3.5mm * var(--content-scale));
+            height: calc(3.5mm * var(--content-scale));
+            border: 1px solid #111827;
             border-radius: 999px;
+            margin-top: calc(0.4mm * var(--content-scale));
         }
 
         .candidate-name {
-            font-size: clamp(8px, calc(13px * var(--content-scale)), 13px);
-            font-weight: 600;
+            font-size: clamp(calc(7px * var(--font-scale)), calc(8.5px * var(--content-scale) * var(--font-scale)), calc(8.5px * var(--font-scale)));
+            font-weight: 700;
             line-height: 1.2;
+            border-bottom: 1px solid #d1d5db;
+            padding-bottom: calc(0.6px * var(--content-scale));
         }
 
         .candidate-party {
-            margin-top: calc(1px * var(--content-scale));
-            font-size: clamp(7px, calc(11px * var(--content-scale)), 11px);
-            color: var(--muted-color);
-            line-height: 1.2;
+            display: inline;
+            font-size: clamp(calc(6px * var(--font-scale)), calc(7.5px * var(--content-scale) * var(--font-scale)), calc(7.5px * var(--font-scale)));
+            font-weight: 600;
+            color: #374151;
+            margin-left: 2px;
+        }
+
+        .tear-line {
+            text-align: center;
+            font-size: clamp(calc(6px * var(--font-scale)), calc(7px * var(--content-scale) * var(--font-scale)), calc(7px * var(--font-scale)));
+            color: #9ca3af;
+            padding: calc(2px * var(--content-scale));
+            border-bottom: 2px dashed #9ca3af;
+            letter-spacing: 1px;
+        }
+
+        .voter-box {
+            padding: calc(4px * var(--content-scale));
+            background: #ffffff;
+        }
+
+        .voter-grid {
+            border: 1.5px solid #111827;
+            display: grid;
+            grid-template-columns: 1fr minmax(20mm, 28mm);
+            grid-template-rows: auto auto minmax(10mm, 16mm);
+            background: #ffffff;
+        }
+
+        .voter-cell {
+            border-right: 1px solid #111827;
+            border-bottom: 1px solid #111827;
+            padding: calc(2px * var(--content-scale)) calc(4px * var(--content-scale));
+            font-size: clamp(calc(6px * var(--font-scale)), calc(8px * var(--content-scale) * var(--font-scale)), calc(8px * var(--font-scale)));
+            font-weight: 700;
+        }
+
+        .voter-cell:last-child,
+        .voter-cell.no-right {
+            border-right: 0;
+        }
+
+        .voter-cell.no-bottom {
+            border-bottom: 0;
+        }
+
+        .voter-value {
+            display: block;
+            margin-top: calc(4px * var(--content-scale));
+            border-bottom: 1px solid #9ca3af;
+            min-height: calc(3mm * var(--content-scale));
+        }
+
+        .thumbmark-box {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(calc(6px * var(--font-scale)), calc(8px * var(--content-scale) * var(--font-scale)), calc(8px * var(--font-scale)));
+            font-weight: 700;
         }
 
         .footer-note {
-            margin-top: calc(6px * var(--content-scale));
+            margin-top: calc(2px * var(--content-scale));
             text-align: right;
-            font-size: clamp(7px, calc(10px * var(--content-scale)), 10px);
-            color: var(--muted-color);
+            font-size: clamp(calc(6px * var(--font-scale)), calc(7px * var(--content-scale) * var(--font-scale)), calc(7px * var(--font-scale)));
+            color: #6b7280;
+            padding: 0 calc(2px * var(--content-scale));
         }
 
         @media print {
@@ -278,7 +389,7 @@
         }
     </style>
 </head>
-<body>
+<body class="density-{{ $densityMode }}">
     <div class="toolbar">
         <div class="toolbar-title">{{ $election->label }} · {{ $paperSize }} · {{ $ballots->count() }} ballot(s) · {{ $perSheet }} per sheet · {{ $scalePercent }}%</div>
         <div class="toolbar-actions">
@@ -316,42 +427,60 @@
                             <div class="marker br"></div>
 
                             <div class="ballot-content">
-                                <header class="header">
-                                    <p class="school-name">{{ config('ballot.school_name') }}</p>
-                                    <div class="header-meta">{{ $election->election_date?->format('F j, Y g:i A') }}</div>
-                                    <div class="ballot-number">Ballot No. {{ str_pad((string) $ballot->ballot_number, 6, '0', STR_PAD_LEFT) }}</div>
-                                </header>
+                                <div class="official-ballot">
+                                    <div class="ballot-main">
+                                        <div class="ballot-top-number">Ballot Number: {{ str_pad((string) $ballot->ballot_number, 4, '0', STR_PAD_LEFT) }}</div>
 
-                                <div class="instructions">
-                                    {{ config('ballot.instructions') }}
-                                </div>
+                                        <div class="ballot-head">
+                                            <div class="official-tag">OFFICIAL<br>BALLOT</div>
+                                            <div class="election-meta">
+                                                <div class="election-title">SELG ELECTION {{ $election->election_date?->format('Y') ?? now()->format('Y') }}</div>
+                                                <div class="election-subtext">{{ config('ballot.school_name') }}</div>
+                                                <div class="election-subtext">{{ $election->election_date?->format('F j, Y') }}</div>
+                                            </div>
+                                        </div>
 
-                                <div class="positions-grid">
-                                    @foreach ($positions as $position)
-                                        <section class="position-block">
-                                            <h2 class="position-title">{{ $position->name }}</h2>
+                                        <div class="instruction-line">General Instructions: Shade the circle beside the name of the candidate of your choice.</div>
 
-                                            @forelse ($position->candidates as $candidate)
-                                                <div class="candidate-row">
-                                                    <span class="bubble"></span>
-                                                    <div>
-                                                        <div class="candidate-name">{{ $candidate->name }}</div>
-                                                        @if ($candidate->party)
-                                                            <div class="candidate-party">{{ $candidate->party }}</div>
-                                                        @endif
+                                        <div class="positions-grid">
+                                            @foreach ($positions as $position)
+                                                <section class="position-block">
+                                                    <h2 class="position-title">{{ $position->name }}</h2>
+
+                                                    <div class="candidate-list">
+                                                        @forelse ($position->candidates as $candidate)
+                                                            <div class="candidate-row">
+                                                                <span class="bubble"></span>
+                                                                <div class="candidate-name">
+                                                                    {{ $candidate->name }}@if ($candidate->party)<span class="candidate-party">, {{ $candidate->party }}</span>@endif
+                                                                </div>
+                                                            </div>
+                                                        @empty
+                                                            <div class="candidate-row">
+                                                                <span class="bubble"></span>
+                                                                <div class="candidate-name">No active candidates configured.</div>
+                                                            </div>
+                                                        @endforelse
                                                     </div>
-                                                </div>
-                                            @empty
-                                                <div class="candidate-row">
-                                                    <span class="bubble"></span>
-                                                    <div class="candidate-name">No active candidates configured.</div>
-                                                </div>
-                                            @endforelse
-                                        </section>
-                                    @endforeach
+                                                </section>
+                                            @endforeach
+                                        </div>
+                                        <div class="footer-note">Election ID {{ $election->id }} · UUID {{ $ballot->uuid }}</div>
+                                    </div>
                                 </div>
+                                <div class="tear-line">✂ ✂ ✂ CUT HERE ✂ ✂ ✂</div>
 
-                                <div class="footer-note">Election ID {{ $election->id }} · UUID {{ $ballot->uuid }}</div>
+                                <div class="voter-box">
+                                    <div class="voter-grid">
+                                        <div class="voter-cell">Name:<span class="voter-value"></span></div>
+                                        <div class="voter-cell no-right">&nbsp;</div>
+                                        <div class="voter-cell">Grade &amp; Section:<span class="voter-value"></span></div>
+                                        <div class="voter-cell no-right">Thumbmark:</div>
+                                        <div class="voter-cell no-bottom">Signature:<span class="voter-value"></span></div>
+                                        <div class="voter-cell no-right no-bottom thumbmark-box">&nbsp;</div>
+                                    </div>
+                                    
+                                </div>
                             </div>
                         </div>
                     </article>
