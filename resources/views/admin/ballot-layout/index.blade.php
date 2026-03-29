@@ -57,27 +57,7 @@
                 @error('print_count') <div class="error">{{ $message }}</div> @enderror
             </div>
 
-            <div class="mb-12">
-                <label for="per_sheet">Ballots per paper</label><br>
-                <select id="per_sheet" name="per_sheet">
-                    <option value="1" @selected(old('per_sheet', 1) == 1)>1 ballot per sheet</option>
-                    <option value="2" @selected(old('per_sheet') == 2)>2 ballots per sheet</option>
-                    <option value="4" @selected(old('per_sheet') == 4)>4 ballots per sheet</option>
-                </select>
-                <p style="margin-top:6px; color:#6b7280; font-size:14px;">
-                    Choose 4 to print four ballots on one paper.
-                </p>
-                @error('per_sheet') <div class="error">{{ $message }}</div> @enderror
-            </div>
 
-            <div class="mb-12">
-                <label for="scale_percent">Ballot scale (%)</label><br>
-                <input id="scale_percent" type="number" name="scale_percent" min="40" max="100" value="{{ old('scale_percent', 100) }}" required>
-                <p style="margin-top:6px; color:#6b7280; font-size:14px;">
-                    Lower value means smaller ballots. For 4-up printing, try 55 to 70.
-                </p>
-                @error('scale_percent') <div class="error">{{ $message }}</div> @enderror
-            </div>
 
             <div class="actions">
                 <button type="submit" class="btn btn-primary">Generate Ballots and Open Print Layout</button>
@@ -129,41 +109,26 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const perSheetInput = document.getElementById('per_sheet');
-        const scaleInput = document.getElementById('scale_percent');
         const previewSheet = document.getElementById('layout-preview-sheet');
         const slots = Array.from(document.querySelectorAll('.preview-slot'));
 
-        if (!perSheetInput || !scaleInput || !previewSheet || slots.length === 0) {
+        if (!previewSheet || slots.length === 0) {
             return;
         }
 
-        const applyPreview = () => {
-            const perSheet = Number(perSheetInput.value || 1);
-            const scalePercent = Number(scaleInput.value || 100);
-            const normalizedScale = Math.max(40, Math.min(100, scalePercent)) / 100;
+        // Fixed layout: 2 ballots per sheet, 100% scale
+        const perSheet = 2;
+        const scalePercent = 100;
+        const normalizedScale = Math.max(40, Math.min(100, scalePercent)) / 100;
 
-            if (perSheet === 4) {
-                previewSheet.style.gridTemplateColumns = '1fr 1fr';
-                previewSheet.style.gridTemplateRows = '1fr 1fr';
-            } else if (perSheet === 2) {
-                previewSheet.style.gridTemplateColumns = '1fr 1fr';
-                previewSheet.style.gridTemplateRows = '1fr';
-            } else {
-                previewSheet.style.gridTemplateColumns = '1fr';
-                previewSheet.style.gridTemplateRows = '1fr';
-            }
+        previewSheet.style.gridTemplateColumns = '1fr 1fr';
+        previewSheet.style.gridTemplateRows = '1fr';
 
-            slots.forEach((slot, index) => {
-                slot.style.display = index < perSheet ? 'flex' : 'none';
-            });
+        slots.forEach((slot, index) => {
+            slot.style.display = index < perSheet ? 'flex' : 'none';
+        });
 
-            previewSheet.style.setProperty('--preview-scale', normalizedScale.toString());
-        };
-
-        perSheetInput.addEventListener('change', applyPreview);
-        scaleInput.addEventListener('input', applyPreview);
-        applyPreview();
+        previewSheet.style.setProperty('--preview-scale', normalizedScale.toString());
     });
 </script>
 @endsection

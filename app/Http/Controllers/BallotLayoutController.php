@@ -33,8 +33,8 @@ class BallotLayoutController extends Controller
     public function generate(StoreBallotGenerationRequest $request): RedirectResponse
     {
         $validated = $request->validated();
-        $perSheet = (int) ($validated['per_sheet'] ?? 1);
-        $scalePercent = (int) ($validated['scale_percent'] ?? 100);
+        $perSheet = 2; // Fixed layout
+        $scalePercent = 100; // Fixed scale
 
         $result = DB::transaction(function () use ($validated) {
             $election = Election::query()
@@ -90,12 +90,10 @@ class BallotLayoutController extends Controller
     {
         $validated = $request->validate([
             'election' => ['required', 'exists:elections,id'],
-            'per_sheet' => ['nullable', 'integer', 'in:1,2,4'],
-            'scale_percent' => ['nullable', 'integer', 'min:40', 'max:100'],
         ]);
 
-        $perSheet = (int) ($validated['per_sheet'] ?? 1);
-        $scalePercent = (int) ($validated['scale_percent'] ?? 100);
+        $perSheet = 2; // Fixed layout
+        $scalePercent = 100; // Fixed scale
 
         $election = Election::query()->findOrFail((int) $validated['election']);
 

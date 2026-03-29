@@ -398,22 +398,7 @@
         </div>
     </div>
 
-    <form method="GET" action="{{ route('admin.ballot-layout.print') }}" style="padding:10px 16px; display:flex; gap:10px; align-items:end; border-bottom:1px solid #e5e7eb; background:#ffffff;">
-        <input type="hidden" name="election" value="{{ $election->id }}">
-        <div>
-            <label for="per_sheet" style="display:block; font-size:12px; color:#6b7280;">Ballots per sheet</label>
-            <select id="per_sheet" name="per_sheet">
-                <option value="1" @selected($perSheet === 1)>1</option>
-                <option value="2" @selected($perSheet === 2)>2</option>
-                <option value="4" @selected($perSheet === 4)>4</option>
-            </select>
-        </div>
-        <div>
-            <label for="scale_percent" style="display:block; font-size:12px; color:#6b7280;">Scale %</label>
-            <input id="scale_percent" type="number" name="scale_percent" min="40" max="100" value="{{ $scalePercent }}">
-        </div>
-        <button type="submit" style="border:1px solid #111827; border-radius:6px; padding:8px 12px; background:#111827; color:#fff;">Apply Layout</button>
-    </form>
+
 
     <div class="print-wrapper">
         @forelse ($sheets as $sheet)
