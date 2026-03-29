@@ -1,5 +1,5 @@
 # SELG Ballot Scanner Development Plan
-
+http://localhost:8000/health
 ## Phase 1: Foundation and Database Setup
 - [x] Create project folder structure
 - [x] Configure `.env` with MySQL placeholders
@@ -14,15 +14,15 @@
 - [x] Build adviser-only user account CRUD
 
 ## Phase 3: Physical Ballot Design
-- [ ] Finalize ballot paper format (A4/Letter)
-- [ ] Add 4 corner anchor markers
-- [ ] Lock bubble size and spacing
+- [x] Finalize ballot paper format (A4/Letter)
+- [x] Add 4 corner anchor markers
+- [x] Lock bubble size and spacing
 
 ## Phase 4: Scanning Engine (Python / FastAPI)
-- [ ] Build image upload endpoint
-- [ ] Implement marker detection and perspective warp
-- [ ] Implement bubble detection by configured coordinates
-- [ ] Return detected candidate IDs as JSON
+- [x] Build image upload endpoint
+- [x] Implement marker detection and perspective warp
+- [x] Implement bubble detection by configured coordinates
+- [x] Return detected candidate IDs as JSON
 
 ## Phase 5: Camera Integration and Facilitator View
 - [ ] Build scanner Blade page
