@@ -13,7 +13,16 @@ class Position extends Model
     protected $fillable = [
         'name',
         'display_order',
+        'votes_allowed',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'display_order' => 'integer',
+            'votes_allowed' => 'integer',
+        ];
+    }
 
     public function candidates(): HasMany
     {

@@ -30,6 +30,7 @@ class PositionController extends Controller
         Position::create([
             'name' => $request->input('name'),
             'display_order' => $request->integer('display_order', 0),
+            'votes_allowed' => $request->integer('votes_allowed', 1),
         ]);
 
         return redirect()
@@ -47,6 +48,7 @@ class PositionController extends Controller
         $position->update([
             'name' => $request->input('name'),
             'display_order' => $request->integer('display_order', 0),
+            'votes_allowed' => $request->integer('votes_allowed', 1),
         ]);
 
         return redirect()

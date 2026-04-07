@@ -26,6 +26,7 @@ class UpdatePositionRequest extends FormRequest
                 Rule::unique('positions', 'name')->ignore($position?->id),
             ],
             'display_order' => ['nullable', 'integer', 'min:0'],
+            'votes_allowed' => ['required', 'integer', 'min:1', 'max:20'],
         ];
     }
 }

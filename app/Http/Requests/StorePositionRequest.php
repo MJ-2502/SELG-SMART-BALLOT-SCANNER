@@ -16,6 +16,7 @@ class StorePositionRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255', 'unique:positions,name'],
             'display_order' => ['nullable', 'integer', 'min:0'],
+            'votes_allowed' => ['required', 'integer', 'min:1', 'max:20'],
         ];
     }
 }

@@ -13,6 +13,7 @@
                 <th>ID</th>
                 <th>Name</th>
                 <th>Display Order</th>
+                <th>Votes Allowed</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -22,6 +23,7 @@
                     <td>{{ $position->id }}</td>
                     <td>{{ $position->name }}</td>
                     <td>{{ $position->display_order }}</td>
+                    <td>{{ $position->votes_allowed ?? 1 }}</td>
                     <td class="actions">
                         <a class="btn btn-muted" href="{{ route('positions.edit', $position) }}">Edit</a>
                         <form action="{{ route('positions.destroy', $position) }}" method="POST" onsubmit="return confirm('Delete this position?');">
@@ -33,7 +35,7 @@
                 </tr>
             @empty
                 <tr>
-                    <td colspan="4">No positions yet.</td>
+                    <td colspan="5">No positions yet.</td>
                 </tr>
             @endforelse
         </tbody>

@@ -19,6 +19,13 @@
             @error('display_order') <div class="error">{{ $message }}</div> @enderror
         </div>
 
+        <div class="mb-12">
+            <label for="votes_allowed">Allowed votes for this position</label><br>
+            <input id="votes_allowed" type="number" min="1" max="20" name="votes_allowed" value="{{ old('votes_allowed', 1) }}" required>
+            <small>Set how many candidates a voter may select for this position.</small>
+            @error('votes_allowed') <div class="error">{{ $message }}</div> @enderror
+        </div>
+
         <div class="actions">
             <button type="submit" class="btn btn-primary">Save</button>
             <a class="btn btn-muted" href="{{ route('positions.index') }}">Cancel</a>

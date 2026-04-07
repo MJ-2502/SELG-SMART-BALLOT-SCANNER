@@ -29,6 +29,10 @@ class ScannerController extends Controller
             ->orderBy('name')
             ->get();
 
+        $positionVoteLimits = $positions->mapWithKeys(function ($position) {
+            return [$position->id => max(1, (int) ($position->votes_allowed ?? 1))];
+        });
+
         return view('scanner.index', [
             'elections' => $elections,
             'positions' => $positions,
@@ -127,7 +131,7 @@ class ScannerController extends Controller
 
         $warnings = [];
         $validVotes = [];
-        $seenPositions = [];
+        $votesPerPosition = [];
 
         foreach ($detectedVotes as $vote) {
             $candidateId = (int) ($vote['candidate_id'] ?? 0);
@@ -149,12 +153,21 @@ class ScannerController extends Controller
                 continue;
             }
 
-            if (isset($seenPositions[$positionId])) {
-                $warnings[] = "Multiple selections detected for position {$positionId}; keeping first result.";
+            $positionLimit = (int) ($positionVoteLimits->get($positionId) ?? 1);
+            $positionVotes = $votesPerPosition[$positionId] ?? [];
+
+            if (in_array($candidateId, $positionVotes, true)) {
+                $warnings[] = "Duplicate candidate {$candidateId} detected for position {$positionId}; ignoring duplicate mark.";
                 continue;
             }
 
-            $seenPositions[$positionId] = true;
+            if (count($positionVotes) >= $positionLimit) {
+                $warnings[] = "Position {$positionId} allows up to {$positionLimit} vote(s); extra selection was ignored.";
+                continue;
+            }
+
+            $positionVotes[] = $candidateId;
+            $votesPerPosition[$positionId] = $positionVotes;
             $validVotes[] = [
                 'position_id' => $positionId,
                 'candidate_id' => $candidateId,
@@ -215,16 +228,21 @@ class ScannerController extends Controller
             ->get(['id', 'position_id'])
             ->keyBy('id');
 
+        $positionVoteLimits = Position::query()
+            ->get(['id', 'votes_allowed'])
+            ->mapWithKeys(fn ($position) => [$position->id => max(1, (int) ($position->votes_allowed ?? 1))]);
+
         $votesByPosition = [];
         foreach ($validated['detected_votes'] as $vote) {
             $positionId = (int) $vote['position_id'];
             $candidateId = (int) $vote['candidate_id'];
+            $positionVotes = $votesByPosition[$positionId] ?? [];
 
-            if (isset($votesByPosition[$positionId])) {
+            if (in_array($candidateId, $positionVotes, true)) {
                 return response()->json([
                     'success' => false,
-                    'message' => "Multiple votes for position {$positionId} are not allowed.",
-                    'errors' => ['One vote per position rule violated.'],
+                    'message' => "Candidate {$candidateId} is duplicated in position {$positionId}.",
+                    'errors' => ['Duplicate candidate in the same position.'],
                 ], 422);
             }
 
@@ -237,7 +255,17 @@ class ScannerController extends Controller
                 ], 422);
             }
 
-            $votesByPosition[$positionId] = $candidateId;
+            $positionLimit = (int) ($positionVoteLimits->get($positionId) ?? 1);
+            if (count($positionVotes) >= $positionLimit) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Position {$positionId} allows only {$positionLimit} vote(s).",
+                    'errors' => ['Position vote limit exceeded.'],
+                ], 422);
+            }
+
+            $positionVotes[] = $candidateId;
+            $votesByPosition[$positionId] = $positionVotes;
         }
 
         $ballot = DB::transaction(function () use ($validated, $votesByPosition) {
@@ -251,13 +279,15 @@ class ScannerController extends Controller
                 'status' => 'scanned',
             ]);
 
-            foreach ($votesByPosition as $positionId => $candidateId) {
-                Vote::query()->create([
-                    'ballot_id' => $ballot->id,
-                    'position_id' => $positionId,
-                    'candidate_id' => $candidateId,
-                    'is_valid' => true,
-                ]);
+            foreach ($votesByPosition as $positionId => $candidateIds) {
+                foreach ($candidateIds as $candidateId) {
+                    Vote::query()->create([
+                        'ballot_id' => $ballot->id,
+                        'position_id' => $positionId,
+                        'candidate_id' => $candidateId,
+                        'is_valid' => true,
+                    ]);
+                }
             }
 
             return $ballot;
