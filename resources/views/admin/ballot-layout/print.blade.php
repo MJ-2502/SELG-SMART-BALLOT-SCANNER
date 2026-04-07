@@ -275,6 +275,16 @@
             text-transform: uppercase;
         }
 
+        .position-vote-limit {
+            margin: 0;
+            padding: calc(2px * var(--content-scale)) calc(5px * var(--content-scale));
+            font-size: clamp(calc(6px * var(--font-scale)), calc(7px * var(--content-scale) * var(--font-scale)), calc(7px * var(--font-scale)));
+            font-weight: 600;
+            color: #1f2937;
+            border-bottom: 1px dashed #9ca3af;
+            background: #f9fafb;
+        }
+
         .candidate-list {
             padding: calc(2px * var(--content-scale)) calc(5px * var(--content-scale));
         }
@@ -431,6 +441,7 @@
                                             @foreach ($positions as $position)
                                                 <section class="position-block">
                                                     <h2 class="position-title">{{ $position->name }}</h2>
+                                                    <p class="position-vote-limit">Vote for up to {{ max(1, (int) ($position->votes_allowed ?? 1)) }} candidate(s)</p>
 
                                                     <div class="candidate-list">
                                                         @forelse ($position->candidates as $candidate)

@@ -102,6 +102,7 @@
                         @forelse ($positions as $position)
                             <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
                                 <div class="text-sm font-semibold text-gray-900">{{ $position->name }}</div>
+                                <div class="text-xs text-indigo-700 mt-1">Vote for up to {{ max(1, (int) ($position->votes_allowed ?? 1)) }} candidate(s)</div>
                                 <div class="mt-2 space-y-1 text-sm text-gray-600">
                                     @foreach ($position->candidates as $candidate)
                                         <div>{{ $candidate->name }}</div>
