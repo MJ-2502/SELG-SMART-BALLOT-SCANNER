@@ -15,6 +15,9 @@
                     <x-nav-link :href="auth()->user()?->isAdviser() ? route('admin.dashboard') : route('dashboard')" :active="request()->routeIs('dashboard') || request()->routeIs('admin.dashboard')">
                         {{ __('Dashboard') }}
                     </x-nav-link>
+                    <x-nav-link :href="route('scanner.index')" :active="request()->routeIs('scanner.*')">
+                        {{ __('Scanner') }}
+                    </x-nav-link>
                     @if (auth()->user()?->isAdviser())
                         <x-nav-link :href="route('users.index')" :active="request()->routeIs('users.*')">
                             {{ __('Users') }}
@@ -83,6 +86,9 @@
         <div class="pt-2 pb-3 space-y-1">
             <x-responsive-nav-link :href="auth()->user()?->isAdviser() ? route('admin.dashboard') : route('dashboard')" :active="request()->routeIs('dashboard') || request()->routeIs('admin.dashboard')">
                 {{ __('Dashboard') }}
+            </x-responsive-nav-link>
+            <x-responsive-nav-link :href="route('scanner.index')" :active="request()->routeIs('scanner.*')">
+                {{ __('Scanner') }}
             </x-responsive-nav-link>
             @if (auth()->user()?->isAdviser())
                 <x-responsive-nav-link :href="route('users.index')" :active="request()->routeIs('users.*')">

@@ -12,12 +12,16 @@
                         @if (auth()->user()?->isAdviser())
                             <p class="mb-4">Adviser access is active.</p>
                             <div class="flex gap-3 flex-wrap">
+                                <a href="{{ route('scanner.index') }}" class="underline">Open Scanner</a>
                                 <a href="{{ route('admin.dashboard') }}" class="underline">Open Admin Dashboard</a>
                                 <a href="{{ route('positions.index') }}" class="underline">Manage Positions</a>
                                 <a href="{{ route('candidates.index') }}" class="underline">Manage Candidates</a>
                             </div>
                         @else
-                            {{ __("You're logged in!") }}
+                            <p class="mb-4">You're logged in!</p>
+                            <div class="flex gap-3 flex-wrap">
+                                <a href="{{ route('scanner.index') }}" class="underline">Open Scanner</a>
+                            </div>
                         @endif
                 </div>
             </div>
