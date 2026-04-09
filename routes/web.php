@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\CandidateController;
 use App\Http\Controllers\BallotLayoutController;
+use App\Http\Controllers\BallotManagementController;
+use App\Http\Controllers\ElectionController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ScannerController;
@@ -30,15 +32,22 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
         return view('admin.dashboard');
     })->name('admin.dashboard');
 
+    Route::resource('elections', ElectionController::class)->except(['show']);
+    Route::post('elections/{election}/start', [ElectionController::class, 'start'])->name('elections.start');
+    Route::post('elections/{election}/stop', [ElectionController::class, 'stop'])->name('elections.stop');
+
     Route::resource('users', UserController::class)->except(['show']);
     Route::resource('positions', PositionController::class)->except(['show']);
     Route::get('candidates/partylist/create', [CandidateController::class, 'createPartylist'])->name('candidates.partylist.create');
     Route::post('candidates/partylist', [CandidateController::class, 'storePartylist'])->name('candidates.partylist.store');
     Route::resource('candidates', CandidateController::class)->except(['show']);
 
-    Route::get('/admin/ballot-layout', [BallotLayoutController::class, 'index'])->name('admin.ballot-layout.index');
-    Route::post('/admin/ballot-layout/generate', [BallotLayoutController::class, 'generate'])->name('admin.ballot-layout.generate');
-    Route::get('/admin/ballot-layout/print', [BallotLayoutController::class, 'print'])->name('admin.ballot-layout.print');
+    Route::get('/admin/ballot-generator', [BallotLayoutController::class, 'index'])->name('admin.ballot-generator.index');
+    Route::post('/admin/ballot-generator/generate', [BallotLayoutController::class, 'generate'])->name('admin.ballot-generator.generate');
+    Route::get('/admin/ballot-generator/print', [BallotLayoutController::class, 'print'])->name('admin.ballot-generator.print');
+
+    Route::get('/admin/ballot-management', [BallotManagementController::class, 'index'])->name('admin.ballot-management.index');
+    Route::delete('/admin/ballot-management/{ballot}', [BallotManagementController::class, 'destroy'])->name('admin.ballot-management.destroy');
 });
 
 Route::middleware('auth')->group(function () {

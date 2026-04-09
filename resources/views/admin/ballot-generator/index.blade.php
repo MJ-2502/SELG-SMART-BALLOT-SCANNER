@@ -22,25 +22,21 @@
             </div>
         @endif
 
-        @if ($elections->isEmpty())
+        @if (! $activeElection)
             <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
-                No elections found. Please add at least one election record first.
+                No active election found. Start an election from Manage Elections first.
             </div>
         @else
-            <form action="{{ route('admin.ballot-layout.generate') }}" method="POST" class="space-y-4">
+            <form action="{{ route('admin.ballot-generator.generate') }}" method="POST" class="space-y-4">
                 @csrf
 
                 <div>
-                    <label class="block text-sm font-medium mb-1" for="election_id">Election</label>
-                    <select id="election_id" name="election_id" required class="ui-input">
-                        <option value="">Select election</option>
-                        @foreach ($elections as $election)
-                            <option value="{{ $election->id }}" @selected(old('election_id') == $election->id)>
-                                {{ $election->label }} (Generated: {{ $election->ballots_count }})
-                            </option>
-                        @endforeach
-                    </select>
-                    @error('election_id') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                    <label class="block text-sm font-medium mb-1">Active Election</label>
+                    <div class="ui-input bg-slate-50 text-slate-700">
+                        {{ $activeElection->label }} (Generated: {{ $activeElection->ballots_count }})
+                    </div>
+                    <p class="mt-1 text-sm text-gray-500">Ballot generation always targets the currently active election.</p>
+                    @error('active_election') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
                 </div>
 
                 <div>

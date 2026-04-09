@@ -16,10 +16,11 @@ class BallotLayoutController extends Controller
 {
     public function index(): View
     {
-        $elections = Election::query()
-            ->orderByDesc('election_date')
+        $activeElection = Election::query()
+            ->where('status', 'active')
             ->withCount('ballots')
-            ->get();
+            ->orderByDesc('election_date')
+            ->first();
 
         $positions = Position::query()
             ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')])
@@ -27,7 +28,7 @@ class BallotLayoutController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('admin.ballot-layout.index', compact('elections', 'positions'));
+        return view('admin.ballot-generator.index', compact('activeElection', 'positions'));
     }
 
     public function generate(StoreBallotGenerationRequest $request): RedirectResponse
@@ -39,7 +40,13 @@ class BallotLayoutController extends Controller
         $result = DB::transaction(function () use ($validated) {
             $election = Election::query()
                 ->lockForUpdate()
-                ->findOrFail($validated['election_id']);
+                ->where('status', 'active')
+                ->orderByDesc('election_date')
+                ->first();
+
+            if (! $election) {
+                return null;
+            }
 
             $targetCount = (int) $validated['print_count'];
             $existingCount = Ballot::query()
@@ -72,8 +79,14 @@ class BallotLayoutController extends Controller
             ];
         });
 
+        if (! $result) {
+            return redirect()
+                ->route('admin.ballot-generator.index')
+                ->withErrors(['active_election' => 'No active election found. Start an election first.']);
+        }
+
         return redirect()
-            ->route('admin.ballot-layout.print', [
+            ->route('admin.ballot-generator.print', [
                 'election' => $result['election']->id,
                 'per_sheet' => $perSheet,
                 'scale_percent' => $scalePercent,
@@ -113,6 +126,6 @@ class BallotLayoutController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('admin.ballot-layout.print', compact('election', 'ballots', 'positions', 'perSheet', 'scalePercent'));
+        return view('admin.ballot-generator.print', compact('election', 'ballots', 'positions', 'perSheet', 'scalePercent'));
     }
 }

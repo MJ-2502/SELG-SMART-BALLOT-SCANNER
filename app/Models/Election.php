@@ -14,6 +14,7 @@ class Election extends Model
     protected $fillable = [
         'election_date',
         'ballot_print_quantity',
+        'status',
     ];
 
     protected function casts(): array
@@ -21,6 +22,7 @@ class Election extends Model
         return [
             'election_date' => 'datetime',
             'ballot_print_quantity' => 'integer',
+            'status' => 'string',
         ];
     }
 

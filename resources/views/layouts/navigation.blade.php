@@ -10,7 +10,8 @@
         $navItems[] = ['label' => 'Users', 'href' => route('users.index'), 'active' => request()->routeIs('users.*')];
         $navItems[] = ['label' => 'Positions', 'href' => route('positions.index'), 'active' => request()->routeIs('positions.*')];
         $navItems[] = ['label' => 'Candidates', 'href' => route('candidates.index'), 'active' => request()->routeIs('candidates.*')];
-        $navItems[] = ['label' => 'Ballot Layout', 'href' => route('admin.ballot-layout.index'), 'active' => request()->routeIs('admin.ballot-layout.*')];
+        $navItems[] = ['label' => 'Ballot Generator', 'href' => route('admin.ballot-generator.index'), 'active' => request()->routeIs('admin.ballot-generator.*')];
+        $navItems[] = ['label' => 'Ballot Management', 'href' => route('admin.ballot-management.index'), 'active' => request()->routeIs('admin.ballot-management.*')];
     }
 @endphp
 

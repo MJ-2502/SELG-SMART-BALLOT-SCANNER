@@ -403,7 +403,7 @@
     <div class="toolbar">
         <div class="toolbar-title">{{ $election->label }} · {{ $paperSize }} · {{ $ballots->count() }} ballot(s) · {{ $perSheet }} per sheet · {{ $scalePercent }}%</div>
         <div class="toolbar-actions">
-            <a href="{{ route('admin.ballot-layout.index') }}">Back to Ballot Generator</a>
+            <a href="{{ route('admin.ballot-generator.index') }}">Back to Ballot Generator</a>
             <button type="button" onclick="window.print()">Print Ballots</button>
         </div>
     </div>
