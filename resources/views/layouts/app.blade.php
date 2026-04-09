@@ -14,27 +14,29 @@
         <!-- Scripts -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body class="font-sans antialiased">
-        <div class="min-h-screen bg-gray-100">
+    <body class="font-sans antialiased bg-gradient-to-b from-slate-50 to-white" x-data="{ sidebarOpen: false }">
+        <div class="min-h-screen">
             @include('layouts.navigation')
 
             <!-- Page Heading -->
-            @isset($header)
-                <header class="bg-white shadow">
-                    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-                        {{ $header }}
-                    </div>
-                </header>
-            @endisset
+            <div class="md:pl-72">
+                @isset($header)
+                    <header class="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
+                        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+                            {{ $header }}
+                        </div>
+                    </header>
+                @endisset
 
-            <!-- Page Content -->
-            <main>
-                @hasSection('content')
-                    @yield('content')
-                @else
-                    {{ $slot ?? '' }}
-                @endif
-            </main>
+                <!-- Page Content -->
+                <main class="py-8">
+                    @hasSection('content')
+                        @yield('content')
+                    @else
+                        {{ $slot ?? '' }}
+                    @endif
+                </main>
+            </div>
         </div>
     </body>
 </html>

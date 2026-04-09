@@ -1,134 +1,84 @@
-@php
-    $paperSize = strtoupper((string) config('ballot.paper.size', 'A4'));
-    $paperWidthMm = $paperSize === 'LETTER' ? 215.9 : 210;
-    $paperHeightMm = $paperSize === 'LETTER' ? 279.4 : 297;
-@endphp
-
 @extends('layouts.app')
 
 @section('content')
-<div class="card">
-    <h1>Ballot Layout</h1>
-    <p>Set how many ballots should be printable for one election. The system assigns a unique ballot number per election to prevent duplication.</p>
+<div class="ui-page">
+    <div class="ui-card">
+        <h1 class="text-xl font-semibold mb-2">Ballot Layout</h1>
+        <p class="text-gray-600 mb-6">Set how many ballots should be printable for one election. The system assigns a unique ballot number per election to prevent duplication.</p>
 
-    @if (session('status'))
-        <div class="mb-12" style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; padding:10px; border-radius:8px;">
-            {{ session('status') }}
-        </div>
-    @endif
+        @if (session('status'))
+            <div class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
+                {{ session('status') }}
+            </div>
+        @endif
 
-    @if ($errors->any())
-        <div class="mb-12" style="color:#991b1b; background:#fef2f2; border:1px solid #fecaca; padding:10px; border-radius:8px;">
-            <ul style="margin:0; padding-left:18px;">
-                @foreach ($errors->all() as $error)
-                    <li>{{ $error }}</li>
-                @endforeach
-            </ul>
-        </div>
-    @endif
-
-    @if ($elections->isEmpty())
-        <div class="mb-12" style="color:#92400e; background:#fffbeb; border:1px solid #fde68a; padding:10px; border-radius:8px;">
-            No elections found. Please add at least one election record first.
-        </div>
-    @else
-        <form action="{{ route('admin.ballot-layout.generate') }}" method="POST">
-            @csrf
-
-            <div class="mb-12">
-                <label for="election_id">Election</label><br>
-                <select id="election_id" name="election_id" required>
-                    <option value="">Select election</option>
-                    @foreach ($elections as $election)
-                        <option value="{{ $election->id }}" @selected(old('election_id') == $election->id)>
-                            {{ $election->label }} (Generated: {{ $election->ballots_count }})
-                        </option>
+        @if ($errors->any())
+            <div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
+                <ul class="list-disc pl-5">
+                    @foreach ($errors->all() as $error)
+                        <li>{{ $error }}</li>
                     @endforeach
-                </select>
-                @error('election_id') <div class="error">{{ $message }}</div> @enderror
+                </ul>
             </div>
+        @endif
 
-            <div class="mb-12">
-                <label for="print_count">Printable ballot count</label><br>
-                <input id="print_count" type="number" name="print_count" min="1" max="5000" value="{{ old('print_count', 50) }}" required>
-                <p style="margin-top:6px; color:#6b7280; font-size:14px;">
-                    Example: entering 200 means this election should have 200 uniquely numbered printable ballots.
-                </p>
-                @error('print_count') <div class="error">{{ $message }}</div> @enderror
+        @if ($elections->isEmpty())
+            <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                No elections found. Please add at least one election record first.
             </div>
+        @else
+            <form action="{{ route('admin.ballot-layout.generate') }}" method="POST" class="space-y-4">
+                @csrf
 
+                <div>
+                    <label class="block text-sm font-medium mb-1" for="election_id">Election</label>
+                    <select id="election_id" name="election_id" required class="ui-input">
+                        <option value="">Select election</option>
+                        @foreach ($elections as $election)
+                            <option value="{{ $election->id }}" @selected(old('election_id') == $election->id)>
+                                {{ $election->label }} (Generated: {{ $election->ballots_count }})
+                            </option>
+                        @endforeach
+                    </select>
+                    @error('election_id') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                </div>
 
+                <div>
+                    <label class="block text-sm font-medium mb-1" for="print_count">Printable ballot count</label>
+                    <input id="print_count" type="number" name="print_count" min="1" max="5000" value="{{ old('print_count', 50) }}" required class="ui-input" />
+                    <p class="mt-1 text-sm text-gray-500">Example: entering 200 means this election should have 200 uniquely numbered printable ballots.</p>
+                    @error('print_count') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                </div>
 
-            <div class="actions">
-                <button type="submit" class="btn btn-primary">Generate Ballots and Open Print Layout</button>
-            </div>
-        </form>
+                <div class="flex gap-3 mt-6">
+                    <button type="submit" class="ui-btn-primary">Generate Ballots and Open Print Layout</button>
+                </div>
+            </form>
 
-        <div style="margin-top:14px; border:1px solid #e5e7eb; border-radius:8px; padding:10px;">
-            <h3 style="margin:0 0 6px; font-size:15px;">Live Print Layout Preview</h3>
-            <p style="margin:0 0 10px; color:#6b7280; font-size:13px;">
-                Paper: {{ $paperSize }} ({{ $paperWidthMm }}mm × {{ $paperHeightMm }}mm). This preview keeps the same paper ratio as actual print output.
-            </p>
-            <div id="layout-preview-sheet" style="--preview-scale:1; width:min(420px, 100%); aspect-ratio: {{ $paperWidthMm }} / {{ $paperHeightMm }}; margin:0 auto; padding:8px; display:grid; gap:8px; background:#f9fafb; border:1px solid #d1d5db; border-radius:8px;">
-                <div class="preview-slot" data-slot="1" style="display:flex; align-items:center; justify-content:center; border:1px dashed #9ca3af; background:#fff; overflow:hidden; min-height:0;">
-                    <div class="preview-mini" style="width:calc(100% * var(--preview-scale)); height:calc(100% * var(--preview-scale)); border:1px solid #111827; background:repeating-linear-gradient(180deg, #fff, #fff 14px, #f3f4f6 14px, #f3f4f6 15px);"></div>
-                </div>
-                <div class="preview-slot" data-slot="2" style="display:none; align-items:center; justify-content:center; border:1px dashed #9ca3af; background:#fff; overflow:hidden; min-height:0;">
-                    <div class="preview-mini" style="width:calc(100% * var(--preview-scale)); height:calc(100% * var(--preview-scale)); border:1px solid #111827; background:repeating-linear-gradient(180deg, #fff, #fff 14px, #f3f4f6 14px, #f3f4f6 15px);"></div>
-                </div>
-                <div class="preview-slot" data-slot="3" style="display:none; align-items:center; justify-content:center; border:1px dashed #9ca3af; background:#fff; overflow:hidden; min-height:0;">
-                    <div class="preview-mini" style="width:calc(100% * var(--preview-scale)); height:calc(100% * var(--preview-scale)); border:1px solid #111827; background:repeating-linear-gradient(180deg, #fff, #fff 14px, #f3f4f6 14px, #f3f4f6 15px);"></div>
-                </div>
-                <div class="preview-slot" data-slot="4" style="display:none; align-items:center; justify-content:center; border:1px dashed #9ca3af; background:#fff; overflow:hidden; min-height:0;">
-                    <div class="preview-mini" style="width:calc(100% * var(--preview-scale)); height:calc(100% * var(--preview-scale)); border:1px solid #111827; background:repeating-linear-gradient(180deg, #fff, #fff 14px, #f3f4f6 14px, #f3f4f6 15px);"></div>
-                </div>
-            </div>
-        </div>
-    @endif
+        @endif
+    </div>
 </div>
 
-<div class="card" style="margin-top:16px;">
-    <h2 style="margin-top:0;">Current Ballot Content Preview</h2>
-    <p style="margin-top:0; color:#6b7280;">This preview is based on active candidates grouped by position.</p>
+<div class="ui-page">
+    <div class="ui-card">
+        <h2 class="text-xl font-semibold mb-2">Current Ballot Content Preview</h2>
+        <p class="text-gray-500 mb-4">This preview is based on active candidates grouped by position.</p>
 
-    @forelse ($positions as $position)
-        <div class="mb-12" style="border:1px solid #e5e7eb; border-radius:8px; padding:10px;">
-            <div style="font-weight:700;">{{ $position->name }}</div>
-            <ul style="margin:8px 0 0; padding-left:18px;">
-                @forelse ($position->candidates as $candidate)
-                    <li>{{ $candidate->name }} @if($candidate->party)({{ $candidate->party }})@endif</li>
-                @empty
-                    <li style="color:#6b7280;">No active candidates for this position.</li>
-                @endforelse
-            </ul>
-        </div>
-    @empty
-        <p>No positions found yet.</p>
-    @endforelse
+        @forelse ($positions as $position)
+            <div class="mb-4 rounded-xl border border-slate-200 p-4">
+                <div class="font-semibold">{{ $position->name }}</div>
+                <ul class="mt-2 list-disc pl-5">
+                    @forelse ($position->candidates as $candidate)
+                        <li>{{ $candidate->name }} @if($candidate->party)({{ $candidate->party }})@endif</li>
+                    @empty
+                        <li class="text-gray-500">No active candidates for this position.</li>
+                    @endforelse
+                </ul>
+            </div>
+        @empty
+            <p>No positions found yet.</p>
+        @endforelse
+    </div>
 </div>
 
-<script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const previewSheet = document.getElementById('layout-preview-sheet');
-        const slots = Array.from(document.querySelectorAll('.preview-slot'));
-
-        if (!previewSheet || slots.length === 0) {
-            return;
-        }
-
-        // Fixed layout: 2 ballots per sheet, 100% scale
-        const perSheet = 2;
-        const scalePercent = 100;
-        const normalizedScale = Math.max(40, Math.min(100, scalePercent)) / 100;
-
-        previewSheet.style.gridTemplateColumns = '1fr 1fr';
-        previewSheet.style.gridTemplateRows = '1fr';
-
-        slots.forEach((slot, index) => {
-            slot.style.display = index < perSheet ? 'flex' : 'none';
-        });
-
-        previewSheet.style.setProperty('--preview-scale', normalizedScale.toString());
-    });
-</script>
 @endsection
