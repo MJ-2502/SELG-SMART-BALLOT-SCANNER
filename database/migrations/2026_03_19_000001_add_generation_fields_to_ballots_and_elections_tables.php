@@ -2,7 +2,6 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -31,7 +30,7 @@ return new class extends Migration
             });
         }
 
-        $indexExists = ! empty(DB::select("SHOW INDEX FROM ballots WHERE Key_name = 'ballots_election_id_ballot_number_unique'"));
+        $indexExists = Schema::hasIndex('ballots', 'ballots_election_id_ballot_number_unique');
 
         if (! $indexExists && Schema::hasColumn('ballots', 'election_id') && Schema::hasColumn('ballots', 'ballot_number')) {
             Schema::table('ballots', function (Blueprint $table) {
@@ -42,7 +41,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        $indexExists = ! empty(DB::select("SHOW INDEX FROM ballots WHERE Key_name = 'ballots_election_id_ballot_number_unique'"));
+        $indexExists = Schema::hasIndex('ballots', 'ballots_election_id_ballot_number_unique');
 
         if ($indexExists) {
             Schema::table('ballots', function (Blueprint $table) {

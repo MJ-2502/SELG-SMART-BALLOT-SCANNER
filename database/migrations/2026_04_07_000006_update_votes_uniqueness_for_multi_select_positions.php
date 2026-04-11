@@ -2,33 +2,36 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        $existingIndexes = collect(DB::select('SHOW INDEX FROM votes'))->pluck('Key_name')->unique()->values()->all();
+        $hasBallotIdIndex = Schema::hasIndex('votes', 'votes_ballot_id_index');
+        $hasPositionIdIndex = Schema::hasIndex('votes', 'votes_position_id_index');
+        $hasCandidateIdIndex = Schema::hasIndex('votes', 'votes_candidate_id_index');
+        $hasBallotPositionUnique = Schema::hasIndex('votes', 'votes_ballot_id_position_id_unique');
+        $hasBallotPositionCandidateUnique = Schema::hasIndex('votes', 'votes_ballot_id_position_id_candidate_id_unique');
 
-        Schema::table('votes', function (Blueprint $table) use ($existingIndexes) {
-            if (! in_array('votes_ballot_id_index', $existingIndexes, true)) {
+        Schema::table('votes', function (Blueprint $table) use ($hasBallotIdIndex, $hasPositionIdIndex, $hasCandidateIdIndex, $hasBallotPositionUnique, $hasBallotPositionCandidateUnique) {
+            if (! $hasBallotIdIndex) {
                 $table->index('ballot_id');
             }
 
-            if (! in_array('votes_position_id_index', $existingIndexes, true)) {
+            if (! $hasPositionIdIndex) {
                 $table->index('position_id');
             }
 
-            if (! in_array('votes_candidate_id_index', $existingIndexes, true)) {
+            if (! $hasCandidateIdIndex) {
                 $table->index('candidate_id');
             }
 
-            if (in_array('votes_ballot_id_position_id_unique', $existingIndexes, true)) {
+            if ($hasBallotPositionUnique) {
                 $table->dropUnique(['ballot_id', 'position_id']);
             }
 
-            if (! in_array('votes_ballot_id_position_id_candidate_id_unique', $existingIndexes, true)) {
+            if (! $hasBallotPositionCandidateUnique) {
                 $table->unique(['ballot_id', 'position_id', 'candidate_id']);
             }
         });
@@ -36,14 +39,15 @@ return new class extends Migration
 
     public function down(): void
     {
-        $existingIndexes = collect(DB::select('SHOW INDEX FROM votes'))->pluck('Key_name')->unique()->values()->all();
+        $hasBallotPositionUnique = Schema::hasIndex('votes', 'votes_ballot_id_position_id_unique');
+        $hasBallotPositionCandidateUnique = Schema::hasIndex('votes', 'votes_ballot_id_position_id_candidate_id_unique');
 
-        Schema::table('votes', function (Blueprint $table) use ($existingIndexes) {
-            if (in_array('votes_ballot_id_position_id_candidate_id_unique', $existingIndexes, true)) {
+        Schema::table('votes', function (Blueprint $table) use ($hasBallotPositionUnique, $hasBallotPositionCandidateUnique) {
+            if ($hasBallotPositionCandidateUnique) {
                 $table->dropUnique(['ballot_id', 'position_id', 'candidate_id']);
             }
 
-            if (! in_array('votes_ballot_id_position_id_unique', $existingIndexes, true)) {
+            if (! $hasBallotPositionUnique) {
                 $table->unique(['ballot_id', 'position_id']);
             }
         });
