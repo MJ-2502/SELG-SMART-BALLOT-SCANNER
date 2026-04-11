@@ -51,6 +51,8 @@
                                 <td class="px-4 py-3">{{ $election->ballots_count ?? 0 }}</td>
                                 <td class="px-4 py-3">
                                     <div class="flex gap-2 flex-wrap">
+                                        <a href="{{ route('admin.ballot-generator.index', ['election' => $election->id]) }}" class="inline-block px-3 py-1 rounded text-xs font-semibold bg-indigo-500 text-white hover:bg-indigo-600">Generate Ballots</a>
+
                                         @if ($election->status === 'pending')
                                             <form method="POST" action="{{ route('elections.start', $election) }}" style="display: inline;">
                                                 @csrf

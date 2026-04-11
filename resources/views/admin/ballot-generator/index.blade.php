@@ -22,21 +22,22 @@
             </div>
         @endif
 
-        @if (! $activeElection)
+        @if (! $targetElection)
             <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
-                No active election found. Start an election from Manage Elections first.
+                No target election found. Choose an election from Manage Elections or start an active election first.
             </div>
         @else
             <form action="{{ route('admin.ballot-generator.generate') }}" method="POST" class="space-y-4">
                 @csrf
+                <input type="hidden" name="election_id" value="{{ $targetElection->id }}" />
 
                 <div>
-                    <label class="block text-sm font-medium mb-1">Active Election</label>
+                    <label class="block text-sm font-medium mb-1">Target Election</label>
                     <div class="ui-input bg-slate-50 text-slate-700">
-                        {{ $activeElection->label }} (Generated: {{ $activeElection->ballots_count }})
+                        {{ $targetElection->label }} (Generated: {{ $targetElection->ballots_count }})
                     </div>
-                    <p class="mt-1 text-sm text-gray-500">Ballot generation always targets the currently active election.</p>
-                    @error('active_election') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                    <p class="mt-1 text-sm text-gray-500">This election was auto-selected from Manage Elections. You can also open this page without an election to target the current active election.</p>
+                    @error('target_election') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
                 </div>
 
                 <div>

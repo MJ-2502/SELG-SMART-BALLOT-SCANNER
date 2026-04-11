@@ -14,13 +14,24 @@ use Illuminate\View\View;
 
 class BallotLayoutController extends Controller
 {
-    public function index(): View
+    public function index(Request $request): View
     {
-        $activeElection = Election::query()
-            ->where('status', 'active')
-            ->withCount('ballots')
-            ->orderByDesc('election_date')
-            ->first();
+        $requestedElectionId = (int) $request->integer('election');
+
+        $targetElection = null;
+        if ($requestedElectionId > 0) {
+            $targetElection = Election::query()
+                ->withCount('ballots')
+                ->find($requestedElectionId);
+        }
+
+        if (! $targetElection) {
+            $targetElection = Election::query()
+                ->where('status', 'active')
+                ->withCount('ballots')
+                ->orderByDesc('election_date')
+                ->first();
+        }
 
         $positions = Position::query()
             ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')])
@@ -28,21 +39,26 @@ class BallotLayoutController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('admin.ballot-generator.index', compact('activeElection', 'positions'));
+        return view('admin.ballot-generator.index', compact('targetElection', 'positions'));
     }
 
     public function generate(StoreBallotGenerationRequest $request): RedirectResponse
     {
         $validated = $request->validated();
+        $requestedElectionId = isset($validated['election_id']) ? (int) $validated['election_id'] : null;
         $perSheet = 2; // Fixed layout
         $scalePercent = 100; // Fixed scale
 
-        $result = DB::transaction(function () use ($validated) {
-            $election = Election::query()
-                ->lockForUpdate()
-                ->where('status', 'active')
-                ->orderByDesc('election_date')
-                ->first();
+        $result = DB::transaction(function () use ($validated, $requestedElectionId) {
+            $electionQuery = Election::query()->lockForUpdate();
+            if ($requestedElectionId) {
+                $election = $electionQuery->find($requestedElectionId);
+            } else {
+                $election = $electionQuery
+                    ->where('status', 'active')
+                    ->orderByDesc('election_date')
+                    ->first();
+            }
 
             if (! $election) {
                 return null;
@@ -81,8 +97,8 @@ class BallotLayoutController extends Controller
 
         if (! $result) {
             return redirect()
-                ->route('admin.ballot-generator.index')
-                ->withErrors(['active_election' => 'No active election found. Start an election first.']);
+                ->route('admin.ballot-generator.index', array_filter(['election' => $requestedElectionId]))
+                ->withErrors(['target_election' => 'No target election found. Select or start an election first.']);
         }
 
         return redirect()

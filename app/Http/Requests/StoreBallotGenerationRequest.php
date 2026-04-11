@@ -14,6 +14,7 @@ class StoreBallotGenerationRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'election_id' => ['nullable', 'exists:elections,id'],
             'print_count' => ['required', 'integer', 'min:1', 'max:5000'],
             'per_sheet' => ['nullable', 'integer', 'in:1,2,4'],
             'scale_percent' => ['nullable', 'integer', 'min:40', 'max:100'],

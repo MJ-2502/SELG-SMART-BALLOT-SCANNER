@@ -13,6 +13,7 @@ class ElectionController extends Controller
     public function index(): View
     {
         $elections = Election::query()
+            ->withCount('ballots')
             ->orderByDesc('election_date')
             ->get();
 
