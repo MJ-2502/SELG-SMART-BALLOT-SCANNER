@@ -265,24 +265,32 @@
             border-bottom: 0;
         }
 
-        .position-title {
-            margin: 0;
+        .position-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: calc(4px * var(--content-scale));
             padding: calc(3px * var(--content-scale)) calc(5px * var(--content-scale));
-            font-size: clamp(calc(7px * var(--font-scale)), calc(9px * var(--content-scale) * var(--font-scale)), calc(9px * var(--font-scale)));
-            font-weight: 700;
             background: #efefef;
             border-bottom: 1px solid #111827;
+        }
+
+        .position-title {
+            margin: 0;
+            padding: 0;
+            font-size: clamp(calc(7px * var(--font-scale)), calc(9px * var(--content-scale) * var(--font-scale)), calc(9px * var(--font-scale)));
+            font-weight: 700;
             text-transform: uppercase;
         }
 
         .position-vote-limit {
             margin: 0;
-            padding: calc(2px * var(--content-scale)) calc(5px * var(--content-scale));
+            padding: 0;
             font-size: clamp(calc(6px * var(--font-scale)), calc(7px * var(--content-scale) * var(--font-scale)), calc(7px * var(--font-scale)));
             font-weight: 600;
             color: #1f2937;
-            border-bottom: 1px dashed #9ca3af;
-            background: #f9fafb;
+            text-align: right;
+            white-space: nowrap;
         }
 
         .candidate-list {
@@ -440,8 +448,10 @@
                                         <div class="positions-grid">
                                             @foreach ($positions as $position)
                                                 <section class="position-block">
-                                                    <h2 class="position-title">{{ $position->name }}</h2>
-                                                    <p class="position-vote-limit">Vote for up to {{ max(1, (int) ($position->votes_allowed ?? 1)) }} candidate(s)</p>
+                                                    <div class="position-head">
+                                                        <h2 class="position-title">{{ $position->name }}</h2>
+                                                        <p class="position-vote-limit">Vote for up to {{ max(1, (int) ($position->votes_allowed ?? 1)) }} candidate(s)</p>
+                                                    </div>
 
                                                     <div class="candidate-list">
                                                         @forelse ($position->candidates as $candidate)

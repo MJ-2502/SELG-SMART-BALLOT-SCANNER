@@ -23,7 +23,7 @@ class ScannerController extends Controller
             ->get();
 
         $positions = Position::query()
-            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')])
+            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
             ->whereHas('candidates', fn ($query) => $query->where('is_active', true))
             ->orderBy('display_order')
             ->orderBy('name')
@@ -50,11 +50,15 @@ class ScannerController extends Controller
         ]);
 
         $positions = Position::query()
-            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')])
+            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
             ->whereHas('candidates', fn ($query) => $query->where('is_active', true))
             ->orderBy('display_order')
             ->orderBy('name')
             ->get();
+
+        $positionVoteLimits = $positions->mapWithKeys(fn ($position) => [
+            $position->id => max(1, (int) ($position->votes_allowed ?? 1)),
+        ]);
 
         $ballotLayout = $this->buildBallotLayout($positions);
 
@@ -99,11 +103,22 @@ class ScannerController extends Controller
 
         $serviceUrl = rtrim((string) config('omr.service_url'), '/');
         $timeout = (int) config('omr.timeout', 30);
+        
+        // Check if debug data is requested (default: false for clean responses)
+        $includeDebugImage = filter_var($request->query('include_debug_image'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
+        $includeDebugBubbles = filter_var($request->query('include_debug_bubbles'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
 
         try {
-            $response = Http::acceptJson()
-                ->timeout($timeout)
-                ->post($serviceUrl . '/scan', $payload);
+            $httpClient = Http::acceptJson()->timeout($timeout);
+            
+            if ($includeDebugImage || $includeDebugBubbles) {
+                $httpClient = $httpClient->withQueryParameters([
+                    'include_debug_image' => $includeDebugImage ? 'true' : 'false',
+                    'include_debug_bubbles' => $includeDebugBubbles ? 'true' : 'false',
+                ]);
+            }
+            
+            $response = $httpClient->post($serviceUrl . '/scan', $payload);
         } catch (\Throwable $exception) {
             return response()->json([
                 'success' => false,
@@ -126,12 +141,15 @@ class ScannerController extends Controller
         $detectedVotes = collect($responseData['detected_votes'] ?? []);
         $activeCandidates = Candidate::query()
             ->where('is_active', true)
-            ->get(['id', 'position_id'])
+            ->get(['id', 'position_id', 'name', 'party'])
             ->keyBy('id');
+        $positionNames = Position::query()->get(['id', 'name'])->keyBy('id');
 
         $warnings = [];
         $validVotes = [];
-        $votesPerPosition = [];
+        $normalizedVotes = [];
+        $minimumConfidence = (float) config('omr.minimum_confidence', 0.34);
+        $minimumGapSingleSeat = (float) config('omr.minimum_gap_single_seat', 0.05);
 
         foreach ($detectedVotes as $vote) {
             $candidateId = (int) ($vote['candidate_id'] ?? 0);
@@ -153,29 +171,64 @@ class ScannerController extends Controller
                 continue;
             }
 
-            $positionLimit = (int) ($positionVoteLimits->get($positionId) ?? 1);
-            $positionVotes = $votesPerPosition[$positionId] ?? [];
-
-            if (in_array($candidateId, $positionVotes, true)) {
-                $warnings[] = "Duplicate candidate {$candidateId} detected for position {$positionId}; ignoring duplicate mark.";
-                continue;
-            }
-
-            if (count($positionVotes) >= $positionLimit) {
-                $warnings[] = "Position {$positionId} allows up to {$positionLimit} vote(s); extra selection was ignored.";
-                continue;
-            }
-
-            $positionVotes[] = $candidateId;
-            $votesPerPosition[$positionId] = $positionVotes;
-            $validVotes[] = [
+            $normalizedVotes[] = [
                 'position_id' => $positionId,
                 'candidate_id' => $candidateId,
                 'confidence' => (float) ($vote['confidence'] ?? 0),
-                'candidate_name' => $vote['candidate_name'] ?? null,
+                'candidate_name' => $vote['candidate_name'] ?? $candidate->name,
+                'candidate_party' => $vote['candidate_party'] ?? $candidate->party,
+                'position_name' => $vote['position_name'] ?? optional($positionNames->get($positionId))->name,
                 'row' => $vote['row'] ?? null,
                 'col' => $vote['col'] ?? null,
             ];
+        }
+
+        $votesPerPosition = collect($normalizedVotes)->groupBy('position_id');
+
+        foreach ($votesPerPosition as $positionId => $votes) {
+            $positionId = (int) $positionId;
+            $positionLimit = (int) ($positionVoteLimits->get($positionId) ?? 1);
+
+            $dedupedByCandidate = $votes
+                ->sortByDesc('confidence')
+                ->unique('candidate_id')
+                ->values();
+
+            $strongVotes = $dedupedByCandidate
+                ->filter(fn ($vote) => (float) ($vote['confidence'] ?? 0) >= $minimumConfidence)
+                ->values();
+
+            if ($strongVotes->isEmpty()) {
+                if ($dedupedByCandidate->isNotEmpty()) {
+                    $warnings[] = "Position {$positionId} has no mark above confidence threshold {$minimumConfidence}.";
+                }
+                continue;
+            }
+
+            if ($positionLimit === 1) {
+                $topVote = $strongVotes->first();
+                $runnerUp = $strongVotes->skip(1)->first();
+                $gap = $runnerUp ? ((float) $topVote['confidence'] - (float) $runnerUp['confidence']) : 1.0;
+
+                if ((float) $topVote['confidence'] < 0.55 && $runnerUp && $gap < $minimumGapSingleSeat) {
+                    $warnings[] = "Position {$positionId} has ambiguous marks; no candidate was auto-selected.";
+                    continue;
+                }
+
+                $selectedVotes = collect([$topVote]);
+            } else {
+                $selectedVotes = $strongVotes->take($positionLimit)->values();
+            }
+
+            $ignoredCount = $dedupedByCandidate->count() - $selectedVotes->count();
+
+            if ($ignoredCount > 0) {
+                $warnings[] = "Position {$positionId} allows up to {$positionLimit} vote(s); {$ignoredCount} lower-confidence mark(s) were ignored.";
+            }
+
+            foreach ($selectedVotes as $vote) {
+                $validVotes[] = $vote;
+            }
         }
 
         $responseData['scan_preview'] = [
@@ -184,6 +237,9 @@ class ScannerController extends Controller
             'detected_votes' => $validVotes,
             'warnings' => $warnings,
         ];
+
+        // Keep API top-level votes aligned with preview so UI shows only filtered, likely-shaded candidates.
+        $responseData['detected_votes'] = $validVotes;
 
         return response()->json($responseData);
     }
@@ -293,6 +349,27 @@ class ScannerController extends Controller
             return $ballot;
         });
 
+        $savedVotes = Vote::query()
+            ->with([
+                'candidate:id,name,party',
+                'position:id,name',
+            ])
+            ->where('ballot_id', $ballot->id)
+            ->orderBy('position_id')
+            ->orderBy('candidate_id')
+            ->get();
+
+        $submittedVotes = $savedVotes->map(function (Vote $vote) {
+            return [
+                'position_id' => (int) $vote->position_id,
+                'position_name' => $vote->position?->name,
+                'candidate_id' => (int) $vote->candidate_id,
+                'candidate_name' => $vote->candidate?->name,
+                'candidate_party' => $vote->candidate?->party,
+                'confidence' => null,
+            ];
+        })->values()->all();
+
         return response()->json([
             'success' => true,
             'message' => 'Ballot submitted successfully.',
@@ -302,7 +379,8 @@ class ScannerController extends Controller
                 'election_id' => $ballot->election_id,
                 'ballot_number' => $ballot->ballot_number,
             ],
-            'votes_saved' => count($votesByPosition),
+            'votes_saved' => count($submittedVotes),
+            'submitted_votes' => $submittedVotes,
         ]);
     }
 
@@ -315,7 +393,9 @@ class ScannerController extends Controller
                     'col' => $colIndex,
                     'candidate_id' => $candidate->id,
                     'candidate_name' => $candidate->name,
+                    'candidate_party' => $candidate->party,
                     'position_id' => $position->id,
+                    'position_name' => $position->name,
                 ];
             });
         })->values();

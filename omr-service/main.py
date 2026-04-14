@@ -2,7 +2,7 @@
 FastAPI application for ballot scanning (OMR service).
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import base64
@@ -43,7 +43,11 @@ async def health_check():
 
 
 @app.post("/scan", response_model=ScanResponse)
-async def scan_ballot(request: ScanRequest) -> ScanResponse:
+async def scan_ballot(
+    request: ScanRequest,
+    include_debug_image: bool = Query(False, description="Include debug visualization image in response"),
+    include_debug_bubbles: bool = Query(False, description="Include detailed bubble debug data in response")
+) -> ScanResponse:
     """
     Main endpoint for scanning a ballot image.
     
@@ -52,6 +56,10 @@ async def scan_ballot(request: ScanRequest) -> ScanResponse:
     - ballot_layout: List of bubble positions with candidate mappings
     - election_id: Optional election ID for tracking
     - ballot_number: Optional ballot number for reference
+    
+    Query parameters:
+    - include_debug_image: (default: false) Include debug overlay image in response
+    - include_debug_bubbles: (default: false) Include detailed bubble measurements in response
     
     Returns:
     - ScanResponse with detected votes, image quality, and marker detection count
@@ -66,6 +74,13 @@ async def scan_ballot(request: ScanRequest) -> ScanResponse:
         
         # Perform scan
         response = scanner.scan(request.ballot_image_base64, request.ballot_layout)
+        
+        # Conditionally include debug data based on query parameters
+        if not include_debug_image:
+            response.debug_visualization_image = None
+        
+        if not include_debug_bubbles:
+            response.debug_bubbles = None
         
         return response
         

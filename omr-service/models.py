@@ -12,7 +12,9 @@ class BubbleCandidate(BaseModel):
     col: int = Field(..., description="Column index within the row")
     candidate_id: int = Field(..., description="Database candidate ID")
     candidate_name: Optional[str] = Field(None, description="Candidate name")
+    candidate_party: Optional[str] = Field(None, description="Candidate party")
     position_id: int = Field(..., description="Position ID this candidate is running for")
+    position_name: Optional[str] = Field(None, description="Position name")
 
 
 class ScanRequest(BaseModel):
@@ -28,6 +30,8 @@ class DetectedVote(BaseModel):
     position_id: int = Field(..., description="Position ID")
     candidate_id: int = Field(..., description="Candidate ID that was selected")
     candidate_name: Optional[str] = Field(None, description="Candidate name")
+    candidate_party: Optional[str] = Field(None, description="Candidate party")
+    position_name: Optional[str] = Field(None, description="Position name")
     confidence: float = Field(..., description="Confidence score (0.0 to 1.0)")
     row: int = Field(..., description="Row index where bubble was detected")
     col: int = Field(..., description="Column index where bubble was detected")
@@ -42,6 +46,15 @@ class ScanResponse(BaseModel):
     markers_detected: int = Field(..., description="Number of markers detected (0-4)")
     processing_time_ms: float = Field(..., description="Processing time in milliseconds")
     errors: List[str] = Field(default_factory=list, description="Any errors or warnings")
+    debug_bubbles: Optional[List[Dict]] = Field(default=None, description="Debug: fill scores for each bubble position")
+    debug_visualization_image: Optional[str] = Field(
+        default=None,
+        description="Temporary debug overlay image (base64 data URL) showing scan scope and detected marks",
+    )
+    processed_preview_image: Optional[str] = Field(
+        default=None,
+        description="Processed ballot preview image after normalization (base64 data URL)",
+    )
 
 
 class HealthResponse(BaseModel):

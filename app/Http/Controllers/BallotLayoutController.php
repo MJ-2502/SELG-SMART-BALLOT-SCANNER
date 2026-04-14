@@ -34,7 +34,7 @@ class BallotLayoutController extends Controller
         }
 
         $positions = Position::query()
-            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')])
+            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
             ->orderBy('display_order')
             ->orderBy('name')
             ->get();
@@ -137,7 +137,7 @@ class BallotLayoutController extends Controller
         $ballots = $ballotsQuery->get();
 
         $positions = Position::query()
-            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')])
+            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
             ->orderBy('display_order')
             ->orderBy('name')
             ->get();

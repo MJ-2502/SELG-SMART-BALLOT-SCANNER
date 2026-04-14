@@ -9,6 +9,7 @@ return [
     'anchor' => [
         'size_mm' => 6,
         'offset_mm' => 6,
+        'scan_bottom_offset_mm' => 70,
     ],
 
     'bubble' => [

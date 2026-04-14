@@ -2,6 +2,7 @@
     $paperMargin = (int) config('ballot.paper.margin_mm', 10);
     $markerSize = (int) config('ballot.anchor.size_mm', 6);
     $markerOffset = (int) config('ballot.anchor.offset_mm', 6);
+    $scanBottomOffset = (int) config('ballot.anchor.scan_bottom_offset_mm', 70);
     $bubbleSize = (int) config('ballot.bubble.diameter_mm', 5);
     $paperSize = strtoupper((string) config('ballot.paper.size', 'A4'));
     $paperWidthMm = $paperSize === 'LETTER' ? 215.9 : 210;
@@ -38,6 +39,7 @@
             --paper-margin: {{ $paperMargin }}mm;
             --marker-size: {{ $markerSize }}mm;
             --marker-offset: {{ $markerOffset }}mm;
+            --scan-bottom-offset: {{ $scanBottomOffset }}mm;
             --bubble-size: {{ $bubbleSize }}mm;
             --paper-width-mm: {{ $paperWidthMm }};
             --paper-height-mm: {{ $paperHeightMm }};
@@ -162,18 +164,6 @@
             gap: calc(6px * var(--content-scale));
         }
 
-        .marker {
-            position: absolute;
-            width: var(--marker-size);
-            height: var(--marker-size);
-            background: #000000;
-        }
-
-        .marker.tl { top: var(--marker-offset); left: var(--marker-offset); }
-        .marker.tr { top: var(--marker-offset); right: var(--marker-offset); }
-        .marker.bl { bottom: var(--marker-offset); left: var(--marker-offset); }
-        .marker.br { bottom: var(--marker-offset); right: var(--marker-offset); }
-
         .official-ballot {
             border: 1.5px solid #111827;
             display: flex;
@@ -265,24 +255,32 @@
             border-bottom: 0;
         }
 
-        .position-title {
-            margin: 0;
+        .position-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: calc(4px * var(--content-scale));
             padding: calc(3px * var(--content-scale)) calc(5px * var(--content-scale));
-            font-size: clamp(calc(7px * var(--font-scale)), calc(9px * var(--content-scale) * var(--font-scale)), calc(9px * var(--font-scale)));
-            font-weight: 700;
             background: #efefef;
             border-bottom: 1px solid #111827;
+        }
+
+        .position-title {
+            margin: 0;
+            padding: 0;
+            font-size: clamp(calc(7px * var(--font-scale)), calc(9px * var(--content-scale) * var(--font-scale)), calc(9px * var(--font-scale)));
+            font-weight: 700;
             text-transform: uppercase;
         }
 
         .position-vote-limit {
             margin: 0;
-            padding: calc(2px * var(--content-scale)) calc(5px * var(--content-scale));
+            padding: 0;
             font-size: clamp(calc(6px * var(--font-scale)), calc(7px * var(--content-scale) * var(--font-scale)), calc(7px * var(--font-scale)));
             font-weight: 600;
             color: #1f2937;
-            border-bottom: 1px dashed #9ca3af;
-            background: #f9fafb;
+            text-align: right;
+            white-space: nowrap;
         }
 
         .candidate-list {
@@ -323,6 +321,7 @@
         }
 
         .tear-line {
+            margin-top: auto;
             text-align: center;
             font-size: clamp(calc(6px * var(--font-scale)), calc(7px * var(--content-scale) * var(--font-scale)), calc(7px * var(--font-scale)));
             color: #9ca3af;
@@ -416,11 +415,6 @@
                 @foreach ($sheet as $ballot)
                     <article class="ballot-page">
                         <div class="ballot-zoom">
-                            <div class="marker tl"></div>
-                            <div class="marker tr"></div>
-                            <div class="marker bl"></div>
-                            <div class="marker br"></div>
-
                             <div class="ballot-content">
                                 <div class="official-ballot">
                                     <div class="ballot-main">
@@ -440,8 +434,10 @@
                                         <div class="positions-grid">
                                             @foreach ($positions as $position)
                                                 <section class="position-block">
-                                                    <h2 class="position-title">{{ $position->name }}</h2>
-                                                    <p class="position-vote-limit">Vote for up to {{ max(1, (int) ($position->votes_allowed ?? 1)) }} candidate(s)</p>
+                                                    <div class="position-head">
+                                                        <h2 class="position-title">{{ $position->name }}</h2>
+                                                        <p class="position-vote-limit">Vote for up to {{ max(1, (int) ($position->votes_allowed ?? 1)) }} candidate(s)</p>
+                                                    </div>
 
                                                     <div class="candidate-list">
                                                         @forelse ($position->candidates as $candidate)
