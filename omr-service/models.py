@@ -15,6 +15,7 @@ class BubbleCandidate(BaseModel):
     candidate_party: Optional[str] = Field(None, description="Candidate party")
     position_id: int = Field(..., description="Position ID this candidate is running for")
     position_name: Optional[str] = Field(None, description="Position name")
+    position_vote_limit: int = Field(1, description="Maximum allowed votes for this position")
 
 
 class ScanRequest(BaseModel):

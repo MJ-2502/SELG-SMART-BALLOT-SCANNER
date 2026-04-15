@@ -149,6 +149,7 @@ class ScannerController extends Controller
         $validVotes = [];
         $normalizedVotes = [];
         $minimumConfidence = (float) config('omr.minimum_confidence', 0.34);
+        $minimumConfidenceMulti = (float) config('omr.minimum_confidence_multi', 0.18);
         $minimumGapSingleSeat = (float) config('omr.minimum_gap_single_seat', 0.05);
 
         foreach ($detectedVotes as $vote) {
@@ -194,18 +195,18 @@ class ScannerController extends Controller
                 ->unique('candidate_id')
                 ->values();
 
-            $strongVotes = $dedupedByCandidate
-                ->filter(fn ($vote) => (float) ($vote['confidence'] ?? 0) >= $minimumConfidence)
-                ->values();
-
-            if ($strongVotes->isEmpty()) {
-                if ($dedupedByCandidate->isNotEmpty()) {
-                    $warnings[] = "Position {$positionId} has no mark above confidence threshold {$minimumConfidence}.";
-                }
-                continue;
-            }
-
             if ($positionLimit === 1) {
+                $strongVotes = $dedupedByCandidate
+                    ->filter(fn ($vote) => (float) ($vote['confidence'] ?? 0) >= $minimumConfidence)
+                    ->values();
+
+                if ($strongVotes->isEmpty()) {
+                    if ($dedupedByCandidate->isNotEmpty()) {
+                        $warnings[] = "Position {$positionId} has no mark above confidence threshold {$minimumConfidence}.";
+                    }
+                    continue;
+                }
+
                 $topVote = $strongVotes->first();
                 $runnerUp = $strongVotes->skip(1)->first();
                 $gap = $runnerUp ? ((float) $topVote['confidence'] - (float) $runnerUp['confidence']) : 1.0;
@@ -217,7 +218,16 @@ class ScannerController extends Controller
 
                 $selectedVotes = collect([$topVote]);
             } else {
-                $selectedVotes = $strongVotes->take($positionLimit)->values();
+                // For multi-vote positions, trust OMR ranking and use a lighter confidence floor.
+                $selectedVotes = $dedupedByCandidate
+                    ->filter(fn ($vote) => (float) ($vote['confidence'] ?? 0) >= $minimumConfidenceMulti)
+                    ->take($positionLimit)
+                    ->values();
+
+                if ($selectedVotes->isEmpty() && $dedupedByCandidate->isNotEmpty()) {
+                    $selectedVotes = $dedupedByCandidate->take($positionLimit)->values();
+                    $warnings[] = "Position {$positionId} used fallback rank selection due low confidence signals.";
+                }
             }
 
             $ignoredCount = $dedupedByCandidate->count() - $selectedVotes->count();
@@ -387,7 +397,8 @@ class ScannerController extends Controller
     private function buildBallotLayout($positions)
     {
         return $positions->flatMap(function ($position, int $rowIndex) {
-            return $position->candidates->values()->map(function ($candidate, int $colIndex) use ($position, $rowIndex) {
+            $positionVoteLimit = max(1, (int) ($position->votes_allowed ?? 1));
+            return $position->candidates->values()->map(function ($candidate, int $colIndex) use ($position, $rowIndex, $positionVoteLimit) {
                 return [
                     'row' => $rowIndex,
                     'col' => $colIndex,
@@ -396,6 +407,7 @@ class ScannerController extends Controller
                     'candidate_party' => $candidate->party,
                     'position_id' => $position->id,
                     'position_name' => $position->name,
+                    'position_vote_limit' => $positionVoteLimit,
                 ];
             });
         })->values();

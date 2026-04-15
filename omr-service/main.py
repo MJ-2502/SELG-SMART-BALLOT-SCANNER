@@ -74,12 +74,14 @@ async def scan_ballot(
         
         # Perform scan
         response = scanner.scan(request.ballot_image_base64, request.ballot_layout)
+
+        has_scan_issues = (not bool(response.success)) or (len(response.detected_votes) == 0)
         
         # Conditionally include debug data based on query parameters
-        if not include_debug_image:
+        if not include_debug_image and not has_scan_issues:
             response.debug_visualization_image = None
         
-        if not include_debug_bubbles:
+        if not include_debug_bubbles and not has_scan_issues:
             response.debug_bubbles = None
         
         return response

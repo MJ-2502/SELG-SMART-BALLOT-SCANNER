@@ -217,6 +217,18 @@ class BallotScanner:
         upper = np.array(HSV_UPPER)
         dark_mask = cv2.inRange(hsv, lower, upper)
 
+        # Use a stricter mask for fill scoring so page gray/noise does not look like shading.
+        local_dark = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            31,
+            9,
+        )
+        score_dark_mask = cv2.bitwise_and(dark_mask, local_dark)
+        score_dark_mask = cv2.medianBlur(score_dark_mask, 3)
+
         scan_y_min = int(height * 0.12)
         scan_y_max = int(height * 0.995)
 
@@ -293,6 +305,7 @@ class BallotScanner:
         default_bubble_center_x = int(width * 0.025)
         bubble_center_x = default_bubble_center_x
         bubble_radius = max(10, int(min(width, height) * 0.0105))
+        x_snap_span = max(2, int(bubble_radius * 0.38))
 
         thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
@@ -568,14 +581,13 @@ class BallotScanner:
                 )
 
                 if use_global_mapping:
-                    x_span = max(4, int(bubble_radius * 0.6))
                     offset = 0
                     for row_index, count in row_counts:
                         row_points = []
                         for point in best_window[offset:offset + count]:
                             row_points.append(
                                 (
-                                    int(np.clip(point[0], bubble_center_x - x_span, bubble_center_x + x_span)),
+                                    int(np.clip(point[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span)),
                                     int(point[1]),
                                 )
                             )
@@ -636,7 +648,7 @@ class BallotScanner:
             y1 = int(max(0, center_y - bubble_radius - 2))
             y2 = int(min(height, center_y + bubble_radius + 2))
 
-            dark_roi = dark_mask[y1:y2, x1:x2]
+            dark_roi = score_dark_mask[y1:y2, x1:x2]
             gray_roi = gray[y1:y2, x1:x2]
             if dark_roi.size == 0 or gray_roi.size == 0:
                 return 0.0
@@ -649,10 +661,12 @@ class BallotScanner:
             inner_radius = max(4, int(bubble_radius * 0.52))
             center_radius = max(2, int(bubble_radius * 0.26))
             outer_radius = max(inner_radius + 2, int(bubble_radius * 0.92))
+            surround_radius = max(outer_radius + 3, int(bubble_radius * 1.55))
             dist2 = (xx - cx) ** 2 + (yy - cy) ** 2
             center_mask = dist2 <= (center_radius ** 2)
             inner_mask = dist2 <= (inner_radius ** 2)
             ring_mask = (dist2 > (inner_radius ** 2)) & (dist2 <= (outer_radius ** 2))
+            surround_mask = (dist2 > (outer_radius ** 2)) & (dist2 <= (surround_radius ** 2))
 
             if np.count_nonzero(inner_mask) == 0:
                 return 0.0
@@ -666,6 +680,20 @@ class BallotScanner:
             center_black = float(np.mean(gray_roi[center_mask] < 118)) if np.count_nonzero(center_mask) else 0.0
             inner_black = float(np.mean(gray_roi[inner_mask] < 118))
             ring_black = float(np.mean(gray_roi[ring_mask] < 118)) if np.count_nonzero(ring_mask) else 0.0
+            surround_ink = float(np.mean((255.0 - gray_roi[surround_mask]) / 255.0)) if np.count_nonzero(surround_mask) else ink_ring
+            surround_dark = float(np.mean(dark_roi[surround_mask] > 0)) if np.count_nonzero(surround_mask) else dark_ratio_ring
+            surround_black = float(np.mean(gray_roi[surround_mask] < 118)) if np.count_nonzero(surround_mask) else ring_black
+
+            # Hard reject likely ring-edge hits when center remains too weak.
+            ring_over_center = ink_ring - ink_center
+            ring_over_inner = ink_ring - ink_inner
+            if (
+                ring_over_center > 0.06
+                and ring_over_inner > 0.04
+                and center_black < 0.42
+                and dark_ratio_center < 0.40
+            ):
+                return 0.0
 
             band = max(1, int(bubble_radius * 0.14))
             h_line_mask = (np.abs(yy - cy) <= band) & (dist2 > (outer_radius ** 2))
@@ -673,21 +701,29 @@ class BallotScanner:
             h_line_dark = float(np.mean(dark_roi[h_line_mask] > 0)) if np.count_nonzero(h_line_mask) else 0.0
             v_line_dark = float(np.mean(dark_roi[v_line_mask] > 0)) if np.count_nonzero(v_line_mask) else 0.0
 
-            # Prioritize tiny-core blackness to reject printed ring/line artifacts.
-            core_minus_ring = max(0.0, center_black - (0.85 * ring_black))
-            inner_minus_ring = max(0.0, inner_black - (0.75 * ring_black))
-            center_strength = max(0.0, (0.55 * ink_center + 0.45 * dark_ratio_center) - 0.12)
-            texture_guard = max(0.0, (0.50 * ink_inner + 0.50 * dark_ratio_inner) - (0.65 * ink_ring + 0.35 * dark_ratio_ring))
-            line_penalty = (0.24 * h_line_dark) + (0.14 * v_line_dark)
+            # Local contrast is the strongest signal for true shading under uneven lighting.
+            center_contrast = max(0.0, ink_center - (surround_ink + 0.03))
+            inner_contrast = max(0.0, ink_inner - (surround_ink + 0.02))
+            black_contrast = max(0.0, center_black - (surround_black + 0.05))
+            dark_contrast = max(0.0, dark_ratio_center - (surround_dark + 0.06))
+            center_anchor_bonus = max(0.0, center_black - 0.30)
+
+            # Reject unfilled ring outlines where ring darkness dominates inner core.
+            ring_bias_penalty = max(0.0, (ink_ring - ink_center) * 0.85)
+            ring_black_penalty = max(0.0, (ring_black - center_black) * 0.60)
+            line_penalty = (0.20 * h_line_dark) + (0.12 * v_line_dark)
 
             score = (
-                (0.46 * core_minus_ring)
-                + (0.24 * inner_minus_ring)
-                + (0.18 * center_strength)
-                + (0.12 * texture_guard)
+                (0.42 * center_contrast)
+                + (0.24 * inner_contrast)
+                + (0.20 * black_contrast)
+                + (0.14 * dark_contrast)
+                + (0.10 * center_anchor_bonus)
+                - ring_bias_penalty
+                - ring_black_penalty
                 - line_penalty
             )
-            return float(max(0.0, min(1.0, score * 1.85)))
+            return float(max(0.0, min(1.0, score * 2.35)))
 
         bubble_measurements = []
         prev_anchor_end = -10**9
@@ -834,10 +870,9 @@ class BallotScanner:
                     # Reject windows that point to another section; fall back to geometry in that case.
                     strict_ok = center_ok and abs(median_shift) <= max_allowed_shift and shift_spread <= max_allowed_spread
                     if strict_ok or (gap_quality_ok and relaxed_shift_ok):
-                        x_span = max(4, int(bubble_radius * 0.6))
                         assigned_ring_points = [
                             (
-                                int(np.clip(point[0], bubble_center_x - x_span, bubble_center_x + x_span)),
+                                int(np.clip(point[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span)),
                                 int(point[1]),
                             )
                             for point in best_window
@@ -848,10 +883,9 @@ class BallotScanner:
                 nearest_single = min(section_rings, key=lambda r: abs(int(r[1]) - geometric_mid))
                 single_tolerance = max(24, int(candidate_step * 1.4))
                 if abs(int(nearest_single[1]) - geometric_mid) <= single_tolerance or len(section_rings) == 1:
-                    x_span = max(4, int(bubble_radius * 0.6))
                     assigned_ring_points = [
                         (
-                            int(np.clip(nearest_single[0], bubble_center_x - x_span, bubble_center_x + x_span)),
+                            int(np.clip(nearest_single[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span)),
                             int(nearest_single[1]),
                         )
                     ]
@@ -874,8 +908,7 @@ class BallotScanner:
                         nearest_ring = min(section_rings, key=lambda r: abs(r[1] - geometric_y))
                         snap_tolerance = max(12, int(candidate_step * 0.70))  # Generous tolerance
                         if abs(nearest_ring[1] - geometric_y) <= snap_tolerance:
-                            x_span = max(4, int(bubble_radius * 0.6))
-                            ring_x = int(np.clip(nearest_ring[0], bubble_center_x - x_span, bubble_center_x + x_span))
+                            ring_x = int(np.clip(nearest_ring[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span))
                             ring_y = int(nearest_ring[1])
                             calibration_mode = "detected_ring_snap"
                     # If no nearby ring or outside tolerance, use geometric Y (no override)
@@ -897,8 +930,7 @@ class BallotScanner:
                             nearest_ring = min(section_rings, key=lambda r: abs(r[1] - ring_y))
                             snap_tolerance = max(8, int(candidate_step * (0.45 if candidate_count >= 3 else 0.55)))
                             if abs(nearest_ring[1] - ring_y) <= snap_tolerance:
-                                x_span = max(4, int(bubble_radius * 0.6))
-                                ring_x = int(np.clip(nearest_ring[0], bubble_center_x - x_span, bubble_center_x + x_span))
+                                ring_x = int(np.clip(nearest_ring[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span))
                                 ring_y = int(nearest_ring[1])
                                 calibration_mode = "section_cluster"
                             elif use_band_constraints:
@@ -915,26 +947,45 @@ class BallotScanner:
                 expected_y = int(geometric_y)
                 best_fill = 0.0
                 best_dx, best_dy = 0, 0
+                lane_left = int(bubble_center_x - max(6, int(bubble_radius * 1.05)))
+                lane_right = int(bubble_center_x + max(8, int(bubble_radius * 1.35)))
 
-                # For multi-candidate positions, search wider X range with MILD penalty
-                # (wider range finds actual bubbles, mild penalty prefers closer offsets)
+                # Keep probing near the bubble lane. Wider offsets can drift into candidate text.
                 if candidate_count >= 2:
-                    # Wider range for multi-candidate: ±20 pixels
-                    probe_x_offsets = list(range(-20, 21, 2))  # [-20, -18, ..., 18, 20]
-                    small_penalty = 0.005  # Very small penalty on offset (find peaks but prefer close)
+                    probe_x_offsets = [-6, -4, -2, 0, 2, 4, 6]
+                    small_penalty = 0.016
                 else:
-                    # Single candidate: standard range
-                    probe_x_offsets = [-6, -3, 0, 3, 6]
-                    small_penalty = 0.018  # Standard penalty
+                    probe_x_offsets = [-4, -2, 0, 2, 4]
+                    small_penalty = 0.022
+                attempted_probe = False
                 
                 for dx in probe_x_offsets:
-                    for dy in (-5, -2, 0, 2, 5):
-                        raw_score = region_fill_ratio(int(ring_x + dx), int(calibrated_y + dy))
-                        # Apply mild penalty on offsets (prefers nearby peaks)
-                        score = raw_score - (abs(dx) * small_penalty) - (abs(dy) * 0.005)
+                    probe_x = int(ring_x + dx)
+                    if probe_x < lane_left or probe_x > lane_right:
+                        continue
+                    for dy in (-3, -1, 0, 1, 3):
+                        attempted_probe = True
+                        raw_score = region_fill_ratio(probe_x, int(calibrated_y + dy))
+                        # Prefer interior-aligned probes; this suppresses ring-edge lock-in.
+                        score = (
+                            raw_score
+                            - (abs(dx) * small_penalty)
+                            - (abs(dy) * 0.007)
+                            - (abs(probe_x - bubble_center_x) * 0.010)
+                        )
                         if score > best_fill:
                             best_fill = score
                             best_dx, best_dy = dx, dy
+
+                if not attempted_probe:
+                    # Ring-snap X can occasionally drift; fall back to geometric lane center.
+                    fallback_x = int(np.clip(bubble_center_x, 0, width - 1))
+                    for dy in (-3, -1, 0, 1, 3):
+                        raw_score = region_fill_ratio(fallback_x, int(calibrated_y + dy))
+                        score = raw_score - (abs(dy) * 0.007)
+                        if score > best_fill:
+                            best_fill = score
+                            best_dx, best_dy = int(fallback_x - ring_x), dy
 
                 measurement = {
                     "position_id": int(bubble.position_id),
@@ -942,6 +993,7 @@ class BallotScanner:
                     "candidate_name": str(bubble.candidate_name) if bubble.candidate_name else None,
                     "candidate_party": str(bubble.candidate_party) if getattr(bubble, "candidate_party", None) else None,
                     "position_name": str(bubble.position_name) if getattr(bubble, "position_name", None) else None,
+                    "position_vote_limit": max(1, int(getattr(bubble, "position_vote_limit", 1) or 1)),
                     "row": int(bubble.row),
                     "col": int(bubble.col),
                     "expected_x": int(ring_x),
@@ -958,9 +1010,14 @@ class BallotScanner:
                 bubble_measurements.append(measurement)
 
         votes_by_position = {}
+        position_vote_limits = {}
         for measurement in bubble_measurements:
             position_id = measurement["position_id"]
             votes_by_position.setdefault(position_id, []).append(measurement)
+            position_vote_limits[position_id] = max(
+                int(position_vote_limits.get(position_id, 1)),
+                int(measurement.get("position_vote_limit", 1) or 1),
+            )
 
         # Blob detections remain available for debugging, but do not force candidate scores.
 
@@ -989,10 +1046,12 @@ class BallotScanner:
         def sigmoid(value: float) -> float:
             return float(1.0 / (1.0 + np.exp(-value)))
 
-        for _, position_votes in votes_by_position.items():
+        for position_id, position_votes in votes_by_position.items():
             ranked = sorted(position_votes, key=lambda item: item["fill_score"], reverse=True)
             if not ranked:
                 continue
+
+            allowed_votes = max(1, int(position_vote_limits.get(position_id, 1)))
 
             raw_scores = np.array([float(item["fill_score"]) for item in ranked], dtype=float)
             score_max = float(np.max(raw_scores))
@@ -1026,30 +1085,61 @@ class BallotScanner:
 
             if is_small_position:
                 raw_floor = max(adaptive_floor_multi, 0.66)
-                min_raw_gap = 0.11
-                min_norm_gap = 0.10
+                min_raw_gap = 0.07
+                min_norm_gap = 0.07
             else:
                 raw_floor = max(adaptive_floor_multi, 0.60)
-                min_raw_gap = 0.08
-                min_norm_gap = 0.08
+                min_raw_gap = 0.06
+                min_norm_gap = 0.06
 
-            evidence_floor = max(
-                raw_floor,
-                score_med + (0.08 if is_small_position else 0.06),
-                score_mean + (0.45 * score_std) + 0.03,
-            )
+            if len(ranked_norm) == 1:
+                # Avoid impossible floor for single-candidate rows (score_med == top_raw).
+                evidence_floor = max(raw_floor - 0.04, global_med + 0.12, 0.58)
+            else:
+                evidence_floor = max(
+                    raw_floor,
+                    score_med + (0.08 if is_small_position else 0.06),
+                    score_mean + (0.45 * score_std) + 0.03,
+                )
             if global_blank_like:
                 evidence_floor = max(evidence_floor, global_med + 0.20, global_p95 + 0.03, 0.68)
             has_strong_evidence = top_raw >= evidence_floor
 
             if len(ranked_norm) == 1:
                 # Single-candidate positions need stricter evidence to avoid blank-ballot false positives.
-                single_candidate_floor = max(0.66, adaptive_floor_single + 0.20, evidence_floor)
+                single_candidate_floor = max(0.58, adaptive_floor_single + 0.14, evidence_floor)
                 if global_blank_like:
-                    single_candidate_floor = max(single_candidate_floor, 0.72)
+                    single_candidate_floor = max(single_candidate_floor, 0.66)
                 if float(top["fill_score"]) >= single_candidate_floor:
                     top["detected"] = True
                     top["detection_mode"] = "single_candidate_strict"
+                continue
+
+            if allowed_votes > 1:
+                multi_raw_floor = max(
+                    raw_floor,
+                    score_med + (0.03 if is_small_position else 0.02),
+                    score_mean + (0.25 * score_std),
+                    global_med + 0.10,
+                )
+                if global_blank_like:
+                    multi_raw_floor = max(multi_raw_floor, global_med + 0.16, global_p95 + 0.01, 0.64)
+
+                selected_count = 0
+                for candidate in ranked_norm:
+                    candidate_raw = float(candidate["fill_score"])
+                    candidate_norm = float(candidate.get("normalized_score", 0.0))
+                    if candidate_raw >= multi_raw_floor and candidate_norm >= 0.36:
+                        candidate["detected"] = True
+                        candidate["detection_mode"] = "multi_select_rank"
+                        selected_count += 1
+                        if selected_count >= allowed_votes:
+                            break
+
+                if selected_count == 0 and top_raw >= max(multi_raw_floor + 0.03, 0.70):
+                    top["detected"] = True
+                    top["detection_mode"] = "multi_select_top"
+
                 continue
 
             # Primary ballot-specific rule: winner must have clear within-position margin.
@@ -1060,20 +1150,17 @@ class BallotScanner:
                 top["detected"] = True
                 top["detection_mode"] = "adaptive_top"
 
-            # Allow likely second vote only for larger positions (e.g., representative lists).
-            if len(ranked_norm) >= 5 and second is not None:
-                # Secondary picks are only valid when a confident primary was already selected.
-                if top["detected"] and second_norm >= 0.52 and second_raw >= raw_floor:
-                    if top_raw - second_raw <= 0.12 and (second_raw - score_med) >= 0.10:
-                        second["detected"] = True
-                        second["detection_mode"] = "normalized_secondary"
-
         if global_blank_like:
             strongest_mark = max((float(m["fill_score"]) for m in bubble_measurements), default=0.0)
-            strong_evidence_floor = max(0.74, global_p95 + 0.06, global_p90 + 0.08)
+            strong_evidence_floor = max(0.72, global_p95 + 0.05, global_p90 + 0.07)
             if strongest_mark < strong_evidence_floor:
                 for measurement in bubble_measurements:
                     if measurement.get("detected"):
+                        if (
+                            measurement.get("detection_mode") == "single_candidate_strict"
+                            and float(measurement.get("fill_score", 0.0)) >= max(0.64, global_med + 0.18)
+                        ):
+                            continue
                         measurement["detected"] = False
                         measurement["detection_mode"] = "global_blank_guard"
 
@@ -1082,6 +1169,7 @@ class BallotScanner:
                 "position_id": measurement["position_id"],
                 "candidate_id": measurement["candidate_id"],
                 "candidate_name": measurement["candidate_name"],
+                "position_vote_limit": measurement.get("position_vote_limit", 1),
                 "row": measurement["row"],
                 "col": measurement["col"],
                 "expected_x": measurement["expected_x"],
