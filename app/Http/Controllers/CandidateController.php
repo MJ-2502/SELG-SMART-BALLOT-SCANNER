@@ -6,8 +6,10 @@ use App\Http\Requests\StoreCandidateRequest;
 use App\Http\Requests\StorePartylistCandidatesRequest;
 use App\Http\Requests\UpdateCandidateRequest;
 use App\Models\Candidate;
+use App\Models\Election;
 use App\Models\Position;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
@@ -20,11 +22,17 @@ class CandidateController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('admin.candidates.index', compact('candidates'));
+        $hasElection = Election::query()->exists();
+
+        return view('admin.candidates.index', compact('candidates', 'hasElection'));
     }
 
-    public function create(): View
+    public function create(): View|RedirectResponse
     {
+        if ($redirect = $this->redirectIfElectionMissing()) {
+            return $redirect;
+        }
+
         $positions = Position::query()
             ->orderBy('display_order')
             ->orderBy('name')
@@ -33,8 +41,12 @@ class CandidateController extends Controller
         return view('admin.candidates.create', compact('positions'));
     }
 
-    public function createPartylist(): View
+    public function createPartylist(): View|RedirectResponse
     {
+        if ($redirect = $this->redirectIfElectionMissing()) {
+            return $redirect;
+        }
+
         $positions = Position::query()
             ->orderBy('display_order')
             ->orderBy('name')
@@ -45,6 +57,10 @@ class CandidateController extends Controller
 
     public function store(StoreCandidateRequest $request): RedirectResponse
     {
+        if ($redirect = $this->redirectIfElectionMissing()) {
+            return $redirect;
+        }
+
         Candidate::create([
             'position_id' => $request->integer('position_id'),
             'name' => $request->input('name'),
@@ -59,6 +75,10 @@ class CandidateController extends Controller
 
     public function storePartylist(StorePartylistCandidatesRequest $request): RedirectResponse
     {
+        if ($redirect = $this->redirectIfElectionMissing()) {
+            return $redirect;
+        }
+
         $party = trim((string) $request->input('party'));
         $isActive = (bool) $request->boolean('is_active', true);
         $entries = collect($request->input('entries', []))
@@ -96,6 +116,28 @@ class CandidateController extends Controller
             ->with('status', "Partylist saved. Created: {$result['created']}, Updated: {$result['updated']}.");
     }
 
+    public function destroyPartylist(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'party' => ['required', 'string', 'max:255'],
+        ]);
+
+        $party = trim((string) $validated['party']);
+        $deleted = Candidate::query()
+            ->where('party', $party)
+            ->delete();
+
+        if ($deleted === 0) {
+            return redirect()
+                ->route('candidates.index')
+                ->with('error', 'Partylist not found or already deleted.');
+        }
+
+        return redirect()
+            ->route('candidates.index')
+            ->with('status', "Partylist \"{$party}\" deleted. Removed {$deleted} candidate(s).");
+    }
+
     public function edit(Candidate $candidate): View
     {
         $positions = Position::query()
@@ -127,5 +169,16 @@ class CandidateController extends Controller
         return redirect()
             ->route('candidates.index')
             ->with('status', 'Candidate deleted successfully.');
+    }
+
+    private function redirectIfElectionMissing(): ?RedirectResponse
+    {
+        if (Election::query()->exists()) {
+            return null;
+        }
+
+        return redirect()
+            ->route('candidates.index')
+            ->with('error', 'Create an election first before adding candidates or creating a partylist.');
     }
 }
