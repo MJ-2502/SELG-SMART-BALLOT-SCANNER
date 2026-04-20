@@ -12,6 +12,7 @@ class Election extends Model
     use HasFactory;
 
     protected $fillable = [
+        'election_name',
         'election_date',
         'ballot_print_quantity',
         'status',
@@ -29,7 +30,9 @@ class Election extends Model
     protected function label(): Attribute
     {
         return Attribute::make(
-            get: fn () => sprintf('Election %s', $this->election_date?->format('F j, Y g:i A')),
+            get: fn () => $this->election_name
+                ? sprintf('%s (%s)', $this->election_name, $this->election_date?->format('F j, Y g:i A'))
+                : sprintf('Election %s', $this->election_date?->format('F j, Y g:i A')),
         );
     }
 

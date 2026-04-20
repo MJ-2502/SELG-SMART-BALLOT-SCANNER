@@ -19,6 +19,23 @@
             @csrf
 
             <div>
+                <label class="block text-sm font-medium mb-2" for="election_name">Election Name</label>
+                <input
+                    type="text"
+                    id="election_name"
+                    name="election_name"
+                    value="{{ old('election_name') }}"
+                    required
+                    maxlength="255"
+                    class="ui-input"
+                    placeholder="e.g., Student Council Election 2026"
+                />
+                @error('election_name')
+                    <p class="text-sm text-red-600 mt-1">{{ $message }}</p>
+                @enderror
+            </div>
+
+            <div>
                 <label class="block text-sm font-medium mb-2" for="election_date">Election Date & Time</label>
                 <input
                     type="datetime-local"

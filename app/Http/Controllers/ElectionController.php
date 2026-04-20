@@ -28,6 +28,7 @@ class ElectionController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate([
+            'election_name' => ['required', 'string', 'max:255'],
             'election_date' => ['required', 'date', 'after:now'],
         ]);
 
