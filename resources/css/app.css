@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+	:root {
+		--ui-bg: #f4f7ff;
+		--ui-bg-soft: #eef2ff;
+		--ui-surface: #ffffff;
+		--ui-text: #0f172a;
+		--ui-muted: #475569;
+		--ui-border: #dbe4ff;
+		--ui-primary: #4f46e5;
+		--ui-primary-strong: #4338ca;
+		--ui-primary-soft: #e0e7ff;
+	}
+
+	body {
+		background:
+			radial-gradient(circle at 12% 12%, #e0e7ff 0%, transparent 34%),
+			radial-gradient(circle at 90% 16%, #c7d2fe 0%, transparent 28%),
+			linear-gradient(180deg, var(--ui-bg) 0%, #f8faff 100%);
+		color: var(--ui-text);
+	}
+}
+
 [x-cloak] {
 	display: none !important;
 }
@@ -16,31 +38,50 @@
 	}
 
 	.ui-card {
-		@apply bg-white border border-slate-100 shadow-sm sm:rounded-xl p-6;
+		@apply border shadow-sm sm:rounded-2xl p-6;
+		background-color: color-mix(in oklab, var(--ui-surface) 92%, transparent);
+		border-color: var(--ui-border);
+		backdrop-filter: blur(12px);
+		box-shadow: 0 18px 45px -28px rgba(67, 56, 202, 0.5);
 	}
 
 	.ui-card-title {
-		@apply text-xl font-semibold text-gray-900;
+		@apply text-xl font-semibold;
+		color: var(--ui-text);
 	}
 
 	.ui-card-subtitle {
-		@apply text-sm text-gray-500;
+		@apply text-sm;
+		color: var(--ui-muted);
 	}
 
 	.ui-btn {
-		@apply inline-flex items-center rounded-lg px-4 py-2 text-sm font-semibold transition;
+		@apply inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition;
 	}
 
 	.ui-btn-primary {
-		@apply ui-btn bg-indigo-600 text-white hover:bg-indigo-700;
+		@apply ui-btn text-white;
+		background: linear-gradient(135deg, var(--ui-primary) 0%, var(--ui-primary-strong) 100%);
+		box-shadow: 0 12px 24px -12px rgba(79, 70, 229, 0.75);
+	}
+
+	.ui-btn-primary:hover {
+		transform: translateY(-1px);
+		box-shadow: 0 16px 28px -14px rgba(79, 70, 229, 0.8);
 	}
 
 	.ui-btn-secondary {
-		@apply ui-btn bg-slate-700 text-white hover:bg-slate-800;
+		@apply ui-btn text-slate-800;
+		background-color: #e2e8f0;
+	}
+
+	.ui-btn-secondary:hover {
+		background-color: #cbd5e1;
 	}
 
 	.ui-btn-danger {
 		@apply ui-btn bg-red-600 text-white hover:bg-red-700;
+		box-shadow: 0 12px 24px -14px rgba(220, 38, 38, 0.75);
 	}
 
 	.ui-btn-sm {
@@ -48,7 +89,13 @@
 	}
 
 	.ui-input {
-		@apply w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500;
+		@apply w-full rounded-xl border-slate-300 shadow-sm;
+		border-color: #cbd5e1;
+	}
+
+	.ui-input:focus {
+		border-color: var(--ui-primary);
+		--tw-ring-color: color-mix(in oklab, var(--ui-primary) 25%, transparent);
 	}
 
 	.ui-table {
@@ -56,11 +103,12 @@
 	}
 
 	.ui-th {
-		@apply text-left p-2 font-semibold text-slate-700;
+		@apply text-left p-3 font-semibold text-slate-700;
+		background-color: color-mix(in oklab, var(--ui-primary-soft) 58%, white);
 	}
 
 	.ui-td {
-		@apply p-2 text-slate-800;
+		@apply p-3 text-slate-800;
 	}
 
 	.ui-row {
