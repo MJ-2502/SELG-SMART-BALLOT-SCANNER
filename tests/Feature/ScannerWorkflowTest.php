@@ -70,6 +70,7 @@ class ScannerWorkflowTest extends TestCase
         ]);
 
         $election = Election::query()->create([
+            'election_name' => 'Active Election',
             'election_date' => now()->addDay(),
             'status' => 'active',
         ]);

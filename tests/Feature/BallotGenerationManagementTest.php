@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Ballot;
+use App\Models\Candidate;
 use App\Models\Election;
+use App\Models\Position;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -18,8 +20,22 @@ class BallotGenerationManagementTest extends TestCase
         $this->actingAsAdviser();
 
         $election = Election::query()->create([
+            'election_name' => 'Test Election A',
             'election_date' => now()->addDays(3),
             'status' => 'active',
+        ]);
+
+        $position = Position::query()->create([
+            'name' => 'President',
+            'display_order' => 1,
+            'votes_allowed' => 1,
+        ]);
+
+        Candidate::query()->create([
+            'position_id' => $position->id,
+            'name' => 'Candidate A',
+            'party' => 'Party One',
+            'is_active' => true,
         ]);
 
         $response = $this->post(route('admin.ballot-generator.generate'), [
@@ -41,11 +57,48 @@ class BallotGenerationManagementTest extends TestCase
         ]);
     }
 
+    public function test_adviser_cannot_generate_ballots_without_partylist_entries(): void
+    {
+        $this->actingAsAdviser();
+
+        $election = Election::query()->create([
+            'election_name' => 'Test Election B',
+            'election_date' => now()->addDays(3),
+            'status' => 'active',
+        ]);
+
+        $position = Position::query()->create([
+            'name' => 'President',
+            'display_order' => 1,
+            'votes_allowed' => 1,
+        ]);
+
+        Candidate::query()->create([
+            'position_id' => $position->id,
+            'name' => 'Candidate Without Partylist',
+            'party' => null,
+            'is_active' => true,
+        ]);
+
+        $response = $this->post(route('admin.ballot-generator.generate'), [
+            'election_id' => $election->id,
+            'print_count' => 3,
+        ]);
+
+        $response->assertRedirect(route('admin.ballot-generator.index', ['election' => $election->id], false));
+        $response->assertSessionHasErrors([
+            'target_election' => 'Before generating ballots for this election, add active partylist first in Candidate Management.',
+        ]);
+
+        $this->assertDatabaseCount('ballots', 0);
+    }
+
     public function test_adviser_can_delete_pending_ballot_from_finished_election(): void
     {
         $this->actingAsAdviser();
 
         $election = Election::query()->create([
+            'election_name' => 'Finished Election',
             'election_date' => now()->subDay(),
             'status' => 'completed',
         ]);
@@ -69,6 +122,7 @@ class BallotGenerationManagementTest extends TestCase
         $this->actingAsAdviser();
 
         $election = Election::query()->create([
+            'election_name' => 'Completed Election',
             'election_date' => now()->subDay(),
             'status' => 'completed',
         ]);

@@ -18,6 +18,7 @@ class ElectionManagementTest extends TestCase
         $this->actingAsAdviser();
 
         $createResponse = $this->post(route('elections.store'), [
+            'election_name' => 'SELG Election 2026',
             'election_date' => now()->addDays(2)->toDateTimeString(),
         ]);
 
@@ -45,6 +46,7 @@ class ElectionManagementTest extends TestCase
         $this->actingAsAdviser();
 
         $election = Election::query()->create([
+            'election_name' => 'Completed Election',
             'election_date' => now()->subDays(1),
             'status' => 'completed',
             'ballot_print_quantity' => 2,

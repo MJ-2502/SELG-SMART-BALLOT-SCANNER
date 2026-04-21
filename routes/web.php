@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\CandidateController;
+use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\BallotLayoutController;
 use App\Http\Controllers\BallotManagementController;
 use App\Http\Controllers\ElectionController;
+use App\Http\Controllers\ElectionProgressController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ScannerController;
@@ -28,9 +30,7 @@ Route::get('/dashboard', function () {
 })->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware(['auth', IsAdviser::class])->group(function () {
-    Route::get('/admin', function () {
-        return view('admin.dashboard');
-    })->name('admin.dashboard');
+    Route::get('/admin', [AdminDashboardController::class, 'index'])->name('admin.dashboard');
 
     Route::resource('elections', ElectionController::class)->except(['show']);
     Route::post('elections/{election}/start', [ElectionController::class, 'start'])->name('elections.start');
@@ -49,6 +49,7 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
 
     Route::get('/admin/ballot-management', [BallotManagementController::class, 'index'])->name('admin.ballot-management.index');
     Route::delete('/admin/ballot-management/{ballot}', [BallotManagementController::class, 'destroy'])->name('admin.ballot-management.destroy');
+    Route::get('/admin/progress', [ElectionProgressController::class, 'index'])->name('admin.progress');
 });
 
 Route::middleware('auth')->group(function () {

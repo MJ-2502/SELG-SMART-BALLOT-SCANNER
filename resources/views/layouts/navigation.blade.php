@@ -17,6 +17,7 @@
     ];
 
     if ($isAdviser) {
+        $navItems[] = ['label' => 'Election Management', 'href' => route('elections.index'), 'active' => request()->routeIs('elections.*'), 'icon' => 'M6 3.75h12A2.25 2.25 0 0 1 20.25 6v12A2.25 2.25 0 0 1 18 20.25H6A2.25 2.25 0 0 1 3.75 18V6A2.25 2.25 0 0 1 6 3.75Zm.75 5.25h10.5v1.5H6.75V9Zm0 3.75h10.5v1.5H6.75v-1.5Zm0 3.75h6v1.5h-6v-1.5Z'];
         $navItems[] = ['label' => 'Users', 'href' => route('users.index'), 'active' => request()->routeIs('users.*'), 'icon' => 'M15 8.25a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-9 9a6 6 0 1 1 12 0v.75H6v-.75Z'];
         $navItems[] = ['label' => 'Positions', 'href' => route('positions.index'), 'active' => request()->routeIs('positions.*'), 'icon' => 'M5.25 4.5h13.5v3H5.25v-3Zm0 6h13.5v3H5.25v-3Zm0 6h13.5v3H5.25v-3Z'];
         $navItems[] = ['label' => 'Candidates', 'href' => route('candidates.index'), 'active' => request()->routeIs('candidates.*'), 'icon' => 'M12 3.75a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm-6.75 15a6.75 6.75 0 0 1 13.5 0V20.25H5.25v-1.5Z'];

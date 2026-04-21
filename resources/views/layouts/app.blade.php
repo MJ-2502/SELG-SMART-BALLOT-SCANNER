@@ -25,41 +25,41 @@
             @include('layouts.navigation')
 
             <header class="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-                <div class="flex min-h-[72px] items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
-                    <div class="flex items-center gap-3">
-                        <button @click="sidebarOpen = true" class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-100 md:hidden">
-                            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <div class="flex min-h-14 sm:min-h-16 md:min-h-[72px] items-center justify-between gap-2 sm:gap-3 md:gap-4 px-3 py-2 sm:px-4 sm:py-3 md:px-6 lg:px-8">
+                    <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+                        <button @click="sidebarOpen = true" class="inline-flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-100 md:hidden shrink-0">
+                            <svg class="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                             </svg>
                         </button>
 
-                        <a href="{{ $dashboardHref }}" class="flex items-center gap-3">
-                            <div class="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md shadow-indigo-300/60 ring-1 ring-indigo-500/30">
-                                <x-application-logo class="h-4 w-4 fill-current" />
+                        <a href="{{ $dashboardHref }}" class="flex items-center gap-2 sm:gap-3 min-w-0">
+                            <div class="inline-flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md shadow-indigo-300/60 ring-1 ring-indigo-500/30 shrink-0">
+                                <x-application-logo class="h-3.5 w-3.5 sm:h-4 sm:w-4 fill-current" />
                             </div>
-                            <div>
-                                <div class="text-xl font-semibold leading-5 text-slate-900">SELG Ballot Scanner</div>
-                                <div class="text-xs text-slate-500">Election Management System</div>
+                            <div class="min-w-0">
+                                <div class="text-sm sm:text-base md:text-lg lg:text-xl font-semibold leading-4 sm:leading-5 text-slate-900 truncate">SELG Ballot Scanner</div>
+                                <div class="hidden sm:block text-xs text-slate-500 truncate">Election Management System</div>
                             </div>
                         </a>
                     </div>
 
-                    <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-2 sm:gap-3">
                         <div class="hidden text-right sm:block">
-                            <div class="text-sm font-semibold text-slate-900">{{ $currentUser?->name }}</div>
-                            <div class="text-xs text-slate-500">{{ $userRole }}</div>
+                            <div class="text-xs sm:text-sm font-semibold text-slate-900 truncate">{{ $currentUser?->name }}</div>
+                            <div class="text-xs text-slate-500 truncate">{{ $userRole }}</div>
                         </div>
 
-                        <a href="{{ route('profile.edit') }}" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+                        <a href="{{ route('profile.edit') }}" class="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium text-slate-700 transition hover:bg-slate-50 shrink-0">
                             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.75a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm-7.5 15a7.5 7.5 0 1 1 15 0v1.5h-15v-1.5Z" /></svg>
                             <span class="hidden sm:inline">Profile</span>
                         </a>
 
                         <form method="POST" action="{{ route('logout') }}">
                             @csrf
-                            <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                            <button type="submit" class="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold text-slate-700 transition hover:bg-slate-50 shrink-0">
                                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15.75 3.75h-7.5A2.25 2.25 0 0 0 6 6v12a2.25 2.25 0 0 0 2.25 2.25h7.5V18h-7.5V6h7.5V3.75Zm-1.06 4.72L13.63 9.53l1.97 1.97H9v1.5h6.6l-1.97 1.97 1.06 1.06 3.75-3.75-3.75-3.75Z" /></svg>
-                                <span>Logout</span>
+                                <span class="hidden sm:inline">Logout</span>
                             </button>
                         </form>
                     </div>

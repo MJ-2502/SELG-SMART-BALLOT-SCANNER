@@ -55,6 +55,7 @@ class CandidateRegistrationGuardTest extends TestCase
     public function test_adviser_can_open_candidate_create_when_election_exists(): void
     {
         Election::query()->create([
+            'election_name' => 'SELG General Election',
             'election_date' => now(),
         ]);
 
