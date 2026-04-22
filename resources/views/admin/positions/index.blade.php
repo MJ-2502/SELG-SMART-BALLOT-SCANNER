@@ -12,8 +12,7 @@
             <table class="ui-table">
                 <thead>
                     <tr class="ui-row">
-                        <th class="ui-th">ID</th>
-                        <th class="ui-th">Name</th>
+                        <th class="ui-th">Officer Positions</th>
                         <th class="ui-th">Display Order</th>
                         <th class="ui-th">Votes Allowed</th>
                         <th class="ui-th">Actions</th>
@@ -22,7 +21,6 @@
                 <tbody>
                     @forelse ($positions as $position)
                         <tr class="ui-row">
-                            <td class="ui-td">{{ $position->id }}</td>
                             <td class="ui-td">{{ $position->name }}</td>
                             <td class="ui-td">{{ $position->display_order }}</td>
                             <td class="ui-td">{{ $position->votes_allowed ?? 1 }}</td>
@@ -39,7 +37,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td class="p-2" colspan="5">No positions yet.</td>
+                            <td class="p-2" colspan="4">No positions yet.</td>
                         </tr>
                     @endforelse
                 </tbody>

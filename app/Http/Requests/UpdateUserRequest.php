@@ -17,19 +17,18 @@ class UpdateUserRequest extends FormRequest
     public function rules(): array
     {
         /** @var User $user */
-        $user = $this->route('user');
+        $user = $this->route('facilitator');
 
         return [
             'name' => ['required', 'string', 'max:255'],
-            'email' => [
+            'username' => [
                 'required',
                 'string',
-                'lowercase',
-                'email',
                 'max:255',
-                Rule::unique('users', 'email')->ignore($user?->id),
+                'alpha_dash',
+                Rule::unique('users', 'username')->ignore($user?->id),
             ],
-            'role' => ['required', Rule::in([User::ROLE_ADVISER, User::ROLE_FACILITATOR])],
+            'grade_level' => ['required', 'string', 'max:50'],
             'password' => ['nullable', 'confirmed', Password::defaults()],
         ];
     }

@@ -10,66 +10,66 @@ class UserManagementTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_adviser_can_create_update_and_delete_a_user_account(): void
+    public function test_adviser_can_create_update_and_delete_a_facilitator_account(): void
     {
         $this->actingAsAdviser();
 
-        $createResponse = $this->post(route('users.store'), [
+        $createResponse = $this->post(route('facilitators.store'), [
             'name' => 'Facilitator One',
-            'email' => 'facilitator1@example.com',
-            'role' => User::ROLE_FACILITATOR,
+            'username' => 'facilitator1',
+            'grade_level' => '12',
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
         ]);
 
-        $createResponse->assertRedirect(route('users.index'));
-        $createResponse->assertSessionHas('status', 'User account created successfully.');
+        $createResponse->assertRedirect(route('facilitators.index'));
+        $createResponse->assertSessionHas('status', 'Facilitator account created successfully.');
 
-        $user = User::query()->where('email', 'facilitator1@example.com')->firstOrFail();
+        $user = User::query()->where('username', 'facilitator1')->firstOrFail();
 
-        $updateResponse = $this->put(route('users.update', $user), [
+        $updateResponse = $this->put(route('facilitators.update', $user), [
             'name' => 'Facilitator Updated',
-            'email' => 'facilitator-updated@example.com',
-            'role' => User::ROLE_FACILITATOR,
+            'username' => 'facilitator-updated',
+            'grade_level' => '11',
             'password' => '',
             'password_confirmation' => '',
         ]);
 
-        $updateResponse->assertRedirect(route('users.index'));
-        $updateResponse->assertSessionHas('status', 'User account updated successfully.');
+        $updateResponse->assertRedirect(route('facilitators.index'));
+        $updateResponse->assertSessionHas('status', 'Facilitator account updated successfully.');
 
         $this->assertDatabaseHas('users', [
             'id' => $user->id,
             'name' => 'Facilitator Updated',
-            'email' => 'facilitator-updated@example.com',
+            'username' => 'facilitator-updated',
+            'grade_level' => '11',
             'role' => User::ROLE_FACILITATOR,
         ]);
 
-        $deleteResponse = $this->delete(route('users.destroy', $user));
+        $deleteResponse = $this->delete(route('facilitators.destroy', $user));
 
-        $deleteResponse->assertRedirect(route('users.index'));
-        $deleteResponse->assertSessionHas('status', 'User account deleted successfully.');
+        $deleteResponse->assertRedirect(route('facilitators.index'));
+        $deleteResponse->assertSessionHas('status', 'Facilitator account deleted successfully.');
         $this->assertDatabaseMissing('users', ['id' => $user->id]);
     }
 
-    public function test_adviser_cannot_delete_their_own_account(): void
+    public function test_adviser_cannot_delete_their_own_account_via_facilitator_routes(): void
     {
         $adviser = $this->actingAsAdviser();
 
-        $response = $this->delete(route('users.destroy', $adviser));
+        $response = $this->delete(route('facilitators.destroy', $adviser));
 
-        $response->assertRedirect(route('users.index'));
-        $response->assertSessionHas('status', 'You cannot delete your own active account.');
+        $response->assertNotFound();
         $this->assertDatabaseHas('users', ['id' => $adviser->id]);
     }
 
-    public function test_facilitator_cannot_access_adviser_user_management_routes(): void
+    public function test_facilitator_cannot_access_adviser_facilitator_management_routes(): void
     {
         $facilitator = User::factory()->create([
             'role' => User::ROLE_FACILITATOR,
         ]);
 
-        $response = $this->actingAs($facilitator)->get(route('users.index'));
+        $response = $this->actingAs($facilitator)->get(route('facilitators.index'));
 
         $response->assertForbidden();
     }

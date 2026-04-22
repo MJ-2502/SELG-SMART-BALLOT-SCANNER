@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Election extends Model
@@ -14,6 +16,7 @@ class Election extends Model
     protected $fillable = [
         'election_name',
         'election_date',
+        'facilitator_id',
         'ballot_print_quantity',
         'status',
     ];
@@ -39,6 +42,17 @@ class Election extends Model
     public function ballots(): HasMany
     {
         return $this->hasMany(Ballot::class);
+    }
+
+    public function facilitator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'facilitator_id');
+    }
+
+    public function facilitators(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'election_facilitator', 'election_id', 'facilitator_id')
+            ->withTimestamps();
     }
 
     public function reports(): HasMany

@@ -85,6 +85,40 @@ class ElectionManagementTest extends TestCase
         $response->assertForbidden();
     }
 
+    public function test_adviser_can_assign_multiple_facilitators_to_election(): void
+    {
+        $this->actingAsAdviser();
+
+        $election = Election::query()->create([
+            'election_name' => 'SELG Election 2026',
+            'election_date' => now()->addDays(2),
+            'status' => 'pending',
+        ]);
+
+        $facilitatorA = User::factory()->create([
+            'role' => User::ROLE_FACILITATOR,
+        ]);
+        $facilitatorB = User::factory()->create([
+            'role' => User::ROLE_FACILITATOR,
+        ]);
+
+        $response = $this->patch(route('elections.facilitators.assign', $election), [
+            'facilitator_ids' => [$facilitatorA->id, $facilitatorB->id],
+        ]);
+
+        $response->assertRedirect(route('elections.index'));
+        $response->assertSessionHas('status', 'Election facilitator assignments updated successfully.');
+
+        $this->assertDatabaseHas('election_facilitator', [
+            'election_id' => $election->id,
+            'facilitator_id' => $facilitatorA->id,
+        ]);
+        $this->assertDatabaseHas('election_facilitator', [
+            'election_id' => $election->id,
+            'facilitator_id' => $facilitatorB->id,
+        ]);
+    }
+
     private function actingAsAdviser(): User
     {
         $adviser = User::factory()->create([

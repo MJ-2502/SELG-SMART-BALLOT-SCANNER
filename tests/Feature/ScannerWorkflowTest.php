@@ -74,6 +74,7 @@ class ScannerWorkflowTest extends TestCase
             'election_date' => now()->addDay(),
             'status' => 'active',
         ]);
+        $election->facilitators()->attach($user->id);
 
         $position = Position::query()->create([
             'name' => 'President',
@@ -125,6 +126,51 @@ class ScannerWorkflowTest extends TestCase
             'position_id' => $position->id,
             'candidate_id' => $candidate->id,
             'is_valid' => 1,
+        ]);
+    }
+
+    public function test_submit_rejects_unassigned_facilitator_for_selected_election(): void
+    {
+        $user = User::factory()->create([
+            'role' => User::ROLE_FACILITATOR,
+        ]);
+
+        $election = Election::query()->create([
+            'election_name' => 'Restricted Election',
+            'election_date' => now()->addDay(),
+            'status' => 'active',
+        ]);
+
+        $position = Position::query()->create([
+            'name' => 'President',
+            'display_order' => 1,
+            'votes_allowed' => 1,
+        ]);
+
+        $candidate = Candidate::query()->create([
+            'position_id' => $position->id,
+            'name' => 'Candidate One',
+            'party' => 'Party A',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user)->postJson(route('scanner.submit'), [
+            'image_hash' => str_repeat('d', 64),
+            'election_id' => $election->id,
+            'ballot_number' => 1,
+            'detected_votes' => [
+                [
+                    'position_id' => $position->id,
+                    'candidate_id' => $candidate->id,
+                    'confidence' => 0.88,
+                ],
+            ],
+        ]);
+
+        $response->assertForbidden();
+        $response->assertJson([
+            'success' => false,
+            'message' => 'You are not assigned to scan ballots for the selected election.',
         ]);
     }
 

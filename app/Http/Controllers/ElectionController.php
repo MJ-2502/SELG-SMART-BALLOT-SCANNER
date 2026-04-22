@@ -3,9 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Election;
+use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class ElectionController extends Controller
@@ -13,16 +15,27 @@ class ElectionController extends Controller
     public function index(): View
     {
         $elections = Election::query()
+            ->with('facilitators:id,name,username,grade_level')
             ->withCount('ballots')
             ->orderByDesc('election_date')
             ->get();
 
-        return view('admin.elections.index', compact('elections'));
+        $facilitators = User::query()
+            ->where('role', User::ROLE_FACILITATOR)
+            ->orderBy('name')
+            ->get(['id', 'name', 'username', 'grade_level']);
+
+        return view('admin.elections.index', compact('elections', 'facilitators'));
     }
 
     public function create(): View
     {
-        return view('admin.elections.create');
+        $facilitators = User::query()
+            ->where('role', User::ROLE_FACILITATOR)
+            ->orderBy('name')
+            ->get(['id', 'name', 'username', 'grade_level']);
+
+        return view('admin.elections.create', compact('facilitators'));
     }
 
     public function store(Request $request): RedirectResponse
@@ -30,13 +43,42 @@ class ElectionController extends Controller
         $validated = $request->validate([
             'election_name' => ['required', 'string', 'max:255'],
             'election_date' => ['required', 'date', 'after:now'],
+            'facilitator_ids' => ['nullable', 'array'],
+            'facilitator_ids.*' => [
+                Rule::exists('users', 'id')->where(fn ($query) => $query->where('role', User::ROLE_FACILITATOR)),
+            ],
         ]);
 
-        Election::create($validated);
+        $election = Election::create([
+            'election_name' => $validated['election_name'],
+            'election_date' => $validated['election_date'],
+        ]);
+
+        $election->facilitators()->sync($validated['facilitator_ids'] ?? []);
 
         return redirect()
             ->route('elections.index')
             ->with('status', 'Election created successfully.');
+    }
+
+    public function assignFacilitators(Request $request, Election $election): RedirectResponse
+    {
+        if (!auth()->user()?->isAdviser()) {
+            abort(403, 'Adviser access only.');
+        }
+
+        $validated = $request->validate([
+            'facilitator_ids' => ['nullable', 'array'],
+            'facilitator_ids.*' => [
+                Rule::exists('users', 'id')->where(fn ($query) => $query->where('role', User::ROLE_FACILITATOR)),
+            ],
+        ]);
+
+        $election->facilitators()->sync($validated['facilitator_ids'] ?? []);
+
+        return redirect()
+            ->route('elections.index')
+            ->with('status', 'Election facilitator assignments updated successfully.');
     }
 
     public function start(Election $election): RedirectResponse

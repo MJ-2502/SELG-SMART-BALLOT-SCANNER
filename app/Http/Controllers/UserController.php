@@ -6,6 +6,7 @@ use App\Http\Requests\StoreUserRequest;
 use App\Http\Requests\UpdateUserRequest;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class UserController extends Controller
@@ -13,7 +14,7 @@ class UserController extends Controller
     public function index(): View
     {
         $users = User::query()
-            ->orderBy('role')
+            ->where('role', User::ROLE_FACILITATOR)
             ->orderBy('name')
             ->get();
 
@@ -29,52 +30,75 @@ class UserController extends Controller
     {
         User::create([
             'name' => $request->input('name'),
-            'email' => $request->input('email'),
-            'role' => $request->input('role'),
+            'username' => $request->input('username'),
+            'grade_level' => $request->input('grade_level'),
+            'email' => $this->generatePlaceholderEmail($request->input('username')),
+            'role' => User::ROLE_FACILITATOR,
             'password' => $request->input('password'),
         ]);
 
         return redirect()
-            ->route('users.index')
-            ->with('status', 'User account created successfully.');
+            ->route('facilitators.index')
+            ->with('status', 'Facilitator account created successfully.');
     }
 
-    public function edit(User $user): View
+    public function edit(User $facilitator): View
     {
-        return view('admin.users.edit', compact('user'));
+        abort_if($facilitator->role !== User::ROLE_FACILITATOR, 404);
+
+        return view('admin.users.edit', ['user' => $facilitator]);
     }
 
-    public function update(UpdateUserRequest $request, User $user): RedirectResponse
+    public function update(UpdateUserRequest $request, User $facilitator): RedirectResponse
     {
+        abort_if($facilitator->role !== User::ROLE_FACILITATOR, 404);
+
         $payload = [
             'name' => $request->input('name'),
-            'email' => $request->input('email'),
-            'role' => $request->input('role'),
+            'username' => $request->input('username'),
+            'grade_level' => $request->input('grade_level'),
+            'role' => User::ROLE_FACILITATOR,
         ];
 
         if ($request->filled('password')) {
             $payload['password'] = $request->input('password');
         }
 
-        $user->update($payload);
+        $facilitator->update($payload);
 
         return redirect()
-            ->route('users.index')
-            ->with('status', 'User account updated successfully.');
+            ->route('facilitators.index')
+            ->with('status', 'Facilitator account updated successfully.');
     }
 
-    public function destroy(User $user): RedirectResponse
+    public function destroy(User $facilitator): RedirectResponse
     {
-        if (auth()->id() === $user->id) {
+        abort_if($facilitator->role !== User::ROLE_FACILITATOR, 404);
+
+        if (auth()->id() === $facilitator->id) {
             return redirect()
-                ->route('users.index')
+                ->route('facilitators.index')
                 ->with('status', 'You cannot delete your own active account.');
         }
 
-        $user->delete();
+        $facilitator->delete();
 
         return redirect()
-            ->route('users.index')
-            ->with('status', 'User account deleted successfully.');
+            ->route('facilitators.index')
+            ->with('status', 'Facilitator account deleted successfully.');
+    }
+
+    private function generatePlaceholderEmail(string $username): string
+    {
+        $base = Str::lower($username);
+        $candidate = "{$base}@facilitator.local";
+        $suffix = 1;
+
+        while (User::query()->where('email', $candidate)->exists()) {
+            $candidate = "{$base}.{$suffix}@facilitator.local";
+            $suffix++;
+        }
+
+        return $candidate;
     }
 }

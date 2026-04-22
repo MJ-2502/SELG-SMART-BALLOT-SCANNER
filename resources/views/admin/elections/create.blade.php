@@ -51,6 +51,36 @@
                 <p class="mt-1 text-sm text-gray-500">Set a future date and time for the election to begin.</p>
             </div>
 
+            <div>
+                <label class="block text-sm font-medium mb-2">Assigned Facilitators</label>
+                <div class="border border-slate-200 rounded-lg p-3 max-h-52 overflow-y-auto bg-white">
+                    @forelse ($facilitators as $facilitator)
+                        <label class="flex items-start gap-3 py-2 border-b border-slate-100 last:border-0">
+                            <input
+                                type="checkbox"
+                                name="facilitator_ids[]"
+                                value="{{ $facilitator->id }}"
+                                @checked(in_array((string) $facilitator->id, array_map('strval', old('facilitator_ids', [])), true))
+                                class="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            >
+                            <span>
+                                <span class="block text-sm font-medium text-slate-800">{{ $facilitator->name }}</span>
+                                <span class="block text-xs text-slate-500">{{ '@' . $facilitator->username }} | Grade {{ $facilitator->grade_level }}</span>
+                            </span>
+                        </label>
+                    @empty
+                        <p class="text-sm text-slate-500">No facilitator accounts found. Create facilitator credentials first.</p>
+                    @endforelse
+                </div>
+                @error('facilitator_ids')
+                    <p class="text-sm text-red-600 mt-1">{{ $message }}</p>
+                @enderror
+                @error('facilitator_ids.*')
+                    <p class="text-sm text-red-600 mt-1">{{ $message }}</p>
+                @enderror
+                <p class="mt-1 text-sm text-gray-500">Select one or more facilitators who are allowed to scan ballots for this election.</p>
+            </div>
+
             <div class="flex gap-2">
                 <button type="submit" class="ui-btn-primary">Create Election</button>
                 <a href="{{ route('elections.index') }}" class="ui-btn-secondary">Cancel</a>

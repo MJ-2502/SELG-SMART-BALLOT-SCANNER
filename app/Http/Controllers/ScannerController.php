@@ -18,9 +18,18 @@ class ScannerController extends Controller
 {
     public function index(): View
     {
-        $elections = Election::query()
-            ->orderByDesc('election_date')
-            ->get();
+        $user = auth()->user();
+
+        $electionsQuery = Election::query()->orderByDesc('election_date');
+
+        if (! $user?->isAdviser()) {
+            $electionsQuery->where(function ($query) use ($user) {
+                $query->whereHas('facilitators', fn ($facilitatorQuery) => $facilitatorQuery->where('users.id', $user?->id))
+                    ->orWhere('facilitator_id', $user?->id);
+            });
+        }
+
+        $elections = $electionsQuery->get();
 
         $positions = Position::query()
             ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
@@ -48,6 +57,14 @@ class ScannerController extends Controller
             'election_id' => ['nullable', 'integer', 'exists:elections,id'],
             'ballot_number' => ['nullable', 'string', 'max:255'],
         ]);
+
+        if (! empty($validated['election_id']) && ! $this->canScanElection((int) $validated['election_id'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not assigned to scan ballots for the selected election.',
+                'errors' => ['Election access denied.'],
+            ], 403);
+        }
 
         $positions = Position::query()
             ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
@@ -266,6 +283,14 @@ class ScannerController extends Controller
             'detected_votes.*.confidence' => ['nullable', 'numeric'],
         ]);
 
+        if (! empty($validated['election_id']) && ! $this->canScanElection((int) $validated['election_id'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not assigned to scan ballots for the selected election.',
+                'errors' => ['Election access denied.'],
+            ], 403);
+        }
+
         if (Ballot::query()->where('image_hash', $validated['image_hash'])->exists()) {
             return response()->json([
                 'success' => false,
@@ -411,5 +436,26 @@ class ScannerController extends Controller
                 ];
             });
         })->values();
+    }
+
+    private function canScanElection(int $electionId): bool
+    {
+        $user = auth()->user();
+
+        if (! $user) {
+            return false;
+        }
+
+        if ($user->isAdviser()) {
+            return true;
+        }
+
+        return Election::query()
+            ->where('id', $electionId)
+            ->where(function ($query) use ($user) {
+                $query->whereHas('facilitators', fn ($facilitatorQuery) => $facilitatorQuery->where('users.id', $user->id))
+                    ->orWhere('facilitator_id', $user->id);
+            })
+            ->exists();
     }
 }

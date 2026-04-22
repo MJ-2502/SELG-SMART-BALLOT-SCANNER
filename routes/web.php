@@ -36,7 +36,7 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
     Route::post('elections/{election}/start', [ElectionController::class, 'start'])->name('elections.start');
     Route::post('elections/{election}/stop', [ElectionController::class, 'stop'])->name('elections.stop');
 
-    Route::resource('users', UserController::class)->except(['show']);
+    Route::resource('facilitators', UserController::class)->except(['show']);
     Route::resource('positions', PositionController::class)->except(['show']);
     Route::get('candidates/partylist/create', [CandidateController::class, 'createPartylist'])->name('candidates.partylist.create');
     Route::post('candidates/partylist', [CandidateController::class, 'storePartylist'])->name('candidates.partylist.store');
@@ -50,6 +50,7 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
     Route::get('/admin/ballot-management', [BallotManagementController::class, 'index'])->name('admin.ballot-management.index');
     Route::delete('/admin/ballot-management/{ballot}', [BallotManagementController::class, 'destroy'])->name('admin.ballot-management.destroy');
     Route::get('/admin/progress', [ElectionProgressController::class, 'index'])->name('admin.progress');
+    Route::patch('elections/{election}/facilitators', [ElectionController::class, 'assignFacilitators'])->name('elections.facilitators.assign');
 });
 
 Route::middleware('auth')->group(function () {
