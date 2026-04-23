@@ -26,7 +26,7 @@ class AdminDashboardTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Welcome to SELG Ballot Scanner');
-        $response->assertSee('Start / Create Election');
+        $response->assertSee('Create Election');
     }
 
     public function test_adviser_with_election_sees_monitoring_cards(): void
