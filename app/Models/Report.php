@@ -20,6 +20,7 @@ class Report extends Model
     {
         return [
             'generated_date' => 'datetime',
+            'report_data' => 'array',
         ];
     }
 
