@@ -25,14 +25,16 @@ http://localhost:8000/health
 - [x] Return detected candidate IDs as JSON
 
 ## Phase 5: Camera Integration and Facilitator View
-- [ ] Build scanner Blade page
-- [ ] Integrate mobile camera with `getUserMedia`
-- [ ] Capture frame and forward to FastAPI through Laravel
-- [ ] Add review and submit confirmation
+- [x] Build scanner Blade page
+- [x] Integrate mobile camera with `getUserMedia`
+- [x] Capture frame and forward to FastAPI through Laravel
+- [x] Add review and submit confirmation
+- [ ] Improve shade / vote detection reliability for ballot scanning
 
 ## Phase 6: Real-Time Results and Dashboard
-- [ ] Build tally dashboard
-- [ ] Add Chart.js visualizations
+- [x] Build tally dashboard
+- [x] Add Chart.js visualizations
+- [x] Add reports page where all the election results stored
 - [ ] Add live updates with Laravel Reverb (optional)
 
 ## Phase 7: Testing and Deployment

@@ -11,11 +11,12 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class BallotLayoutController extends Controller
 {
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $requestedElectionId = (int) $request->integer('election');
 
@@ -40,7 +41,7 @@ class BallotLayoutController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('admin.ballot-generator.index', compact('targetElection', 'positions'));
+        return Inertia::render('Admin/BallotGenerator/Index', compact('targetElection', 'positions'));
     }
 
     public function generate(StoreBallotGenerationRequest $request): RedirectResponse
@@ -146,7 +147,7 @@ class BallotLayoutController extends Controller
             );
     }
 
-    public function print(Request $request): View
+    public function print(Request $request): Response
     {
         $validated = $request->validate([
             'election' => ['required', 'exists:elections,id'],
@@ -167,12 +168,15 @@ class BallotLayoutController extends Controller
 
         $ballots = $ballotsQuery->get();
 
+        $election->setAttribute('election_year', $election->election_date?->format('Y') ?? now()->format('Y'));
+        $election->setAttribute('election_date_formatted', $election->election_date?->format('F j, Y'));
+
         $positions = Position::query()
             ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
             ->orderBy('display_order')
             ->orderBy('name')
             ->get();
 
-        return view('admin.ballot-generator.print', compact('election', 'ballots', 'positions', 'perSheet', 'scalePercent'));
+        return Inertia::render('Admin/BallotGenerator/Print', compact('election', 'ballots', 'positions', 'perSheet', 'scalePercent'));
     }
 }

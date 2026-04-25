@@ -6,11 +6,12 @@ use App\Models\Candidate;
 use App\Models\Election;
 use App\Models\Position;
 use App\Services\ElectionTallyService;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class AdminDashboardController extends Controller
 {
-    public function index(ElectionTallyService $tallyService): View
+    public function index(ElectionTallyService $tallyService): Response
     {
         $activeElection = Election::query()
             ->where('status', 'active')
@@ -39,7 +40,7 @@ class AdminDashboardController extends Controller
             $stats['voter_turnout'] = $tallyData['summary']['turnout_percent'];
         }
 
-        return view('admin.dashboard', [
+        return Inertia::render('Admin/Dashboard', [
             'hasElection' => $hasElection,
             'selectedElection' => $selectedElection,
             'stats' => $stats,

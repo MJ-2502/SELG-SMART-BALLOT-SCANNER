@@ -6,23 +6,24 @@ use App\Http\Requests\StorePositionRequest;
 use App\Http\Requests\UpdatePositionRequest;
 use App\Models\Position;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class PositionController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
         $positions = Position::query()
             ->orderBy('display_order')
             ->orderBy('name')
             ->get();
 
-        return view('admin.positions.index', compact('positions'));
+        return Inertia::render('Admin/Positions/Index', compact('positions'));
     }
 
-    public function create(): View
+    public function create(): Response
     {
-        return view('admin.positions.create');
+        return Inertia::render('Admin/Positions/Create');
     }
 
     public function store(StorePositionRequest $request): RedirectResponse
@@ -38,9 +39,9 @@ class PositionController extends Controller
             ->with('status', 'Position created successfully.');
     }
 
-    public function edit(Position $position): View
+    public function edit(Position $position): Response
     {
-        return view('admin.positions.edit', compact('position'));
+        return Inertia::render('Admin/Positions/Edit', compact('position'));
     }
 
     public function update(UpdatePositionRequest $request, Position $position): RedirectResponse

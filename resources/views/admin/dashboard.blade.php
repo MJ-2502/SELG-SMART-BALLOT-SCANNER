@@ -85,39 +85,14 @@
                 <div class="rounded-xl border border-slate-200 bg-white p-4">
                     <h2 class="text-base font-semibold text-slate-900 mb-3">Position Tallies</h2>
 
-                    <div class="space-y-5">
+                    <div class="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
                         @foreach ($tallyData['position_tallies'] as $position)
                             <div class="rounded-xl border border-slate-200 p-4">
                                 <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                                     <h3 class="font-semibold text-slate-900">{{ $position['position_name'] }}</h3>
                                     <span class="text-xs text-slate-500">Total votes: {{ $position['total_votes'] }}</span>
                                 </div>
-
-                                @php
-                                    $maxVotes = max(1, collect($position['candidates'])->max('votes') ?? 1);
-                                @endphp
-
-                                <div class="space-y-2">
-                                    @foreach ($position['candidates'] as $candidate)
-                                        @php
-                                            $width = (int) round(($candidate['votes'] / $maxVotes) * 100);
-                                        @endphp
-                                        <div>
-                                            <div class="flex items-center justify-between text-sm text-slate-600 mb-1">
-                                                <span>
-                                                    {{ $candidate['name'] }}
-                                                    @if ($candidate['party'])
-                                                        <span class="text-xs text-slate-500">({{ $candidate['party'] }})</span>
-                                                    @endif
-                                                </span>
-                                                <span class="font-medium text-slate-900">{{ $candidate['votes'] }}</span>
-                                            </div>
-                                            <div class="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
-                                                <div class="h-full rounded-full bg-indigo-500" style="width: {{ $width }}%"></div>
-                                            </div>
-                                        </div>
-                                    @endforeach
-                                </div>
+                                <canvas id="positionChart{{ $loop->index }}" height="220"></canvas>
                             </div>
                         @endforeach
                     </div>
@@ -132,6 +107,7 @@
     <script>
         const summary = @json($tallyData['summary']);
         const topCandidates = @json($tallyData['top_candidates']);
+        const positionTallies = @json($tallyData['position_tallies']);
 
         const submissionQualityCtx = document.getElementById('submissionQualityChart');
         if (submissionQualityCtx) {
@@ -187,6 +163,43 @@
                 },
             });
         }
+
+        positionTallies.forEach((position, index) => {
+            const positionChartCtx = document.getElementById(`positionChart${index}`);
+
+            if (!positionChartCtx) {
+                return;
+            }
+
+            new Chart(positionChartCtx, {
+                type: 'bar',
+                data: {
+                    labels: position.candidates.map((candidate) => candidate.name),
+                    datasets: [{
+                        label: 'Votes',
+                        data: position.candidates.map((candidate) => candidate.votes),
+                        backgroundColor: '#2563eb',
+                        borderRadius: 6,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: false,
+                        },
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                precision: 0,
+                            },
+                        },
+                    },
+                },
+            });
+        });
     </script>
 @endif
 @endsection

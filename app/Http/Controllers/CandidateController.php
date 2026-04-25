@@ -11,11 +11,12 @@ use App\Models\Position;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class CandidateController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
         $candidates = Candidate::query()
             ->with('position')
@@ -24,10 +25,10 @@ class CandidateController extends Controller
 
         $hasElection = Election::query()->exists();
 
-        return view('admin.candidates.index', compact('candidates', 'hasElection'));
+        return Inertia::render('Admin/Candidates/Index', compact('candidates', 'hasElection'));
     }
 
-    public function create(): View|RedirectResponse
+    public function create(): Response|RedirectResponse
     {
         if ($redirect = $this->redirectIfElectionMissing()) {
             return $redirect;
@@ -38,10 +39,10 @@ class CandidateController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('admin.candidates.create', compact('positions'));
+        return Inertia::render('Admin/Candidates/Create', compact('positions'));
     }
 
-    public function createPartylist(): View|RedirectResponse
+    public function createPartylist(): Response|RedirectResponse
     {
         if ($redirect = $this->redirectIfElectionMissing()) {
             return $redirect;
@@ -52,7 +53,7 @@ class CandidateController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('admin.candidates.create-partylist', compact('positions'));
+        return Inertia::render('Admin/Candidates/CreatePartylist', compact('positions'));
     }
 
     public function store(StoreCandidateRequest $request): RedirectResponse
@@ -138,14 +139,14 @@ class CandidateController extends Controller
             ->with('status', "Partylist \"{$party}\" deleted. Removed {$deleted} candidate(s).");
     }
 
-    public function edit(Candidate $candidate): View
+    public function edit(Candidate $candidate): Response
     {
         $positions = Position::query()
             ->orderBy('display_order')
             ->orderBy('name')
             ->get();
 
-        return view('admin.candidates.edit', compact('candidate', 'positions'));
+        return Inertia::render('Admin/Candidates/Edit', compact('candidate', 'positions'));
     }
 
     public function update(UpdateCandidateRequest $request, Candidate $candidate): RedirectResponse
