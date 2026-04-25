@@ -15,6 +15,7 @@ class Candidate extends Model
         'position_id',
         'name',
         'party',
+        'color_code',
         'photo_path',
         'is_active',
     ];

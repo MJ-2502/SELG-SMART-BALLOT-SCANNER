@@ -1,11 +1,21 @@
 <script setup>
-import { computed } from 'vue';
-import { Head, Link } from '@inertiajs/vue3';
+import { computed, ref } from 'vue';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
 defineOptions({ layout: AdminLayout });
 
 const props = defineProps({ candidates: Array, hasElection: Boolean });
+
+const colorPalette = [
+    '#EF4444', '#F97316', '#F59E0B', '#EAB308', '#84CC16', '#22C55E',
+    '#10B981', '#14B8A6', '#06B6D4', '#0EA5E9', '#3B82F6', '#6366F1',
+    '#8B5CF6', '#A855F7', '#D946EF', '#EC4899', '#F43F5E', '#DC2626',
+    '#EA580C', '#CA8A04', '#16A34A', '#0891B2', '#2563EB', '#7C3AED',
+];
+
+const openColorParty = ref(null);
+const colorForm = useForm({ party: '', color_code: '' });
 
 const partyGroups = computed(() => {
     const groups = props.candidates.reduce((acc, candidate) => {
@@ -21,6 +31,7 @@ const partyGroups = computed(() => {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([party, candidates]) => ({
             party,
+            color_code: candidates.find((candidate) => candidate.color_code)?.color_code ?? null,
             candidates: [...candidates].sort((left, right) => {
                 const leftOrder = left.position?.display_order ?? 9999;
                 const rightOrder = right.position?.display_order ?? 9999;
@@ -34,6 +45,57 @@ const partyGroups = computed(() => {
 
 const confirmDeleteCandidate = () => window.confirm('Delete this candidate?');
 const confirmDeletePartylist = () => window.confirm('Delete this partylist and all its candidates?');
+
+const usedColors = computed(() => {
+    const colors = props.candidates
+        .map((candidate) => String(candidate.color_code ?? '').toUpperCase().trim())
+        .filter((color) => color !== '');
+
+    return new Set(colors);
+});
+
+const toggleColorPicker = (group) => {
+    if (openColorParty.value === group.party) {
+        openColorParty.value = null;
+        colorForm.reset();
+        colorForm.clearErrors();
+        return;
+    }
+
+    openColorParty.value = group.party;
+    colorForm.party = group.party;
+    colorForm.color_code = String(group.color_code ?? '').toUpperCase();
+    colorForm.clearErrors();
+};
+
+const isColorUnavailableForGroup = (group, color) => {
+    const normalized = String(color).toUpperCase();
+    const currentGroupColor = String(group.color_code ?? '').toUpperCase();
+
+    if (normalized === currentGroupColor) {
+        return false;
+    }
+
+    return usedColors.value.has(normalized);
+};
+
+const pickGroupColor = (group, color) => {
+    if (isColorUnavailableForGroup(group, color)) {
+        return;
+    }
+
+    colorForm.color_code = String(color).toUpperCase();
+};
+
+const saveGroupColor = () => {
+    colorForm.patch('/candidates/partylist/color', {
+        preserveScroll: true,
+        onSuccess: () => {
+            openColorParty.value = null;
+            colorForm.reset();
+        },
+    });
+};
 </script>
 
 <template>
@@ -77,17 +139,61 @@ const confirmDeletePartylist = () => window.confirm('Delete this partylist and a
                     <span class="text-sm text-gray-500">{{ group.candidates.length }} candidate(s)</span>
                 </div>
 
-                <form
-                    v-if="group.party !== 'Independent'"
-                    action="/candidates/partylist"
-                    method="POST"
-                    @submit="(e) => { if (!confirmDeletePartylist()) e.preventDefault(); }"
-                >
-                    <input type="hidden" name="_token" :value="$page.props.csrf_token" />
-                    <input type="hidden" name="_method" value="DELETE" />
-                    <input type="hidden" name="party" :value="group.party" />
-                    <button type="submit" class="ui-btn-danger ui-btn-sm">Delete Partylist</button>
-                </form>
+                <div class="relative flex items-center gap-2">
+                    <button
+                        type="button"
+                        class="h-8 w-8 rounded-full border-2 border-slate-300 shadow-sm"
+                        :style="{ backgroundColor: group.color_code || '#E5E7EB' }"
+                        title="Set partylist color"
+                        aria-label="Set partylist color"
+                        @click="toggleColorPicker(group)"
+                    />
+
+                    <form
+                        v-if="group.party !== 'Independent'"
+                        action="/candidates/partylist"
+                        method="POST"
+                        @submit="(e) => { if (!confirmDeletePartylist()) e.preventDefault(); }"
+                    >
+                        <input type="hidden" name="_token" :value="$page.props.csrf_token" />
+                        <input type="hidden" name="_method" value="DELETE" />
+                        <input type="hidden" name="party" :value="group.party" />
+                        <button type="submit" class="ui-btn-danger ui-btn-sm">Delete Partylist</button>
+                    </form>
+
+                    <div
+                        v-if="openColorParty === group.party"
+                        class="absolute right-0 top-10 z-20 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg"
+                    >
+                        <p class="text-xs font-semibold text-slate-700 mb-2">Select color for {{ group.party }}</p>
+                        <div class="grid grid-cols-8 gap-2 mb-3">
+                            <button
+                                v-for="color in colorPalette"
+                                :key="`${group.party}-${color}`"
+                                type="button"
+                                class="h-7 w-7 rounded-full border-2 transition"
+                                :class="[
+                                    colorForm.color_code === color ? 'border-slate-900 scale-105' : 'border-slate-300',
+                                    isColorUnavailableForGroup(group, color) ? 'opacity-35 cursor-not-allowed' : 'hover:scale-105'
+                                ]"
+                                :style="{ backgroundColor: color }"
+                                :disabled="isColorUnavailableForGroup(group, color)"
+                                :title="isColorUnavailableForGroup(group, color) ? `${color} (already used)` : color"
+                                @click="pickGroupColor(group, color)"
+                            />
+                        </div>
+
+                        <p v-if="colorForm.errors.color_code" class="text-xs text-red-600 mb-2">{{ colorForm.errors.color_code }}</p>
+
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-xs text-slate-600">{{ colorForm.color_code || 'No color selected' }}</span>
+                            <div class="flex gap-2">
+                                <button type="button" class="ui-btn-secondary ui-btn-sm" @click="toggleColorPicker(group)">Cancel</button>
+                                <button type="button" class="ui-btn-primary ui-btn-sm" :disabled="!colorForm.color_code || colorForm.processing" @click="saveGroupColor">Save</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="overflow-x-auto">
