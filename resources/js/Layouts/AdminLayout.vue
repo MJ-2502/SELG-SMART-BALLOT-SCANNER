@@ -87,7 +87,7 @@ function toggleSidebar() {
                             v-for="item in navItems"
                             :key="item.label"
                             :href="item.href"
-                            class="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition"
+                            class="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium"
                             :class="item.active ? 'bg-indigo-100 text-indigo-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'"
                         >
                             <i :class="[item.icon, item.active ? 'text-indigo-600' : 'text-slate-400']" class="text-base leading-none shrink-0" aria-hidden="true"></i>
@@ -98,40 +98,40 @@ function toggleSidebar() {
             </aside>
         </div>
 
-        <aside class="fixed bottom-6 left-4 top-[5.75rem] z-10 hidden flex-col rounded-2xl border border-slate-200 bg-white/92 text-slate-800 shadow-lg shadow-slate-200/80 backdrop-blur transition-all duration-300 ease-out md:flex" :class="sidebarCollapsed ? 'w-20' : 'w-64'">
-            <div class="flex items-center justify-between border-b border-slate-200/80 transition-all duration-300" :class="sidebarCollapsed ? 'px-2 py-2' : 'px-3 py-2.5'">
-                <div v-show="!sidebarCollapsed" class="flex items-center gap-2 min-w-0" x-transition.opacity.duration.200ms>
+        <aside class="fixed bottom-6 left-4 top-[5.75rem] z-10 hidden flex-col rounded-2xl border border-slate-200 bg-white/92 text-slate-800 shadow-lg shadow-slate-200/80 backdrop-blur ease-out md:flex" :class="sidebarCollapsed ? 'w-20' : 'w-64'">
+            <div class="flex items-center border-b border-slate-200/80" :class="sidebarCollapsed ? 'justify-center px-2 py-2' : 'justify-between px-3 py-2.5'">
+                <div v-show="!sidebarCollapsed" class="flex items-center gap-2 min-w-0">
                     <span class="text-xs font-semibold tracking-wide text-slate-600 truncate">Navigation</span>
                 </div>
 
                 <button
                     type="button"
                     @click="toggleSidebar()"
-                    class="sidebar-toggle-btn inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition-all duration-300 ease-out hover:bg-slate-100 hover:border-indigo-300 hover:text-indigo-700"
+                    class="sidebar-toggle-btn inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 ease-out hover:bg-slate-100 hover:border-indigo-300 hover:text-indigo-700"
                     :class="sidebarCollapsed ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-200/80' : ''"
                     aria-label="Toggle sidebar"
                     title="Toggle sidebar"
                 >
-                    <i class="bi bi-layout-sidebar text-base leading-none transition-transform duration-300" :class="sidebarCollapsed ? 'rotate-180 scale-105' : ''" aria-hidden="true"></i>
+                    <i class="bi bi-layout-sidebar text-base" :class="sidebarCollapsed ? 'rotate-180 scale-105' : ''" aria-hidden="true"></i>
                 </button>
             </div>
 
-            <div class="flex-1 overflow-y-auto py-3 transition-all duration-300" :class="sidebarCollapsed ? 'px-2' : 'px-3'">
+            <div class="flex-1 overflow-y-auto py-3" :class="sidebarCollapsed ? 'px-2' : 'px-3'">
                 <Link
                     v-for="item in navItems"
                     :key="item.label"
                     :href="item.href"
                     :title="item.label"
-                    class="flex items-center rounded-xl text-sm font-medium overflow-hidden transition-all duration-300"
+                    class="flex items-center rounded-xl text-sm font-medium overflow-hidden"
                     :class="[item.active ? 'bg-indigo-100 text-indigo-700 shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900', sidebarCollapsed ? 'justify-center px-2 py-3' : 'gap-3 px-4 py-3']"
                 >
                     <i
-                        :class="[item.icon, item.active ? 'text-indigo-600' : 'text-slate-400', sidebarCollapsed ? 'text-lg scale-105' : 'text-base']"
-                        class="leading-none shrink-0 transition-all duration-300"
+                        :class="[item.icon, item.active ? 'text-indigo-600' : 'text-slate-400']"
+                        class="text-base leading-none shrink-0"
                         aria-hidden="true"
                     ></i>
                     <span
-                        class="whitespace-nowrap transition-all duration-200 ease-out"
+                        class="whitespace-nowrap"
                         :class="sidebarCollapsed ? 'max-w-0 opacity-0 translate-x-2' : 'max-w-48 opacity-100 translate-x-0'"
                     >
                         {{ item.label }}
