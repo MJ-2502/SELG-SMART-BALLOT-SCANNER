@@ -62,6 +62,7 @@ class ElectionTallyService
                         'id' => $candidate->id,
                         'name' => $candidate->name,
                         'party' => $candidate->party,
+                        'color_code' => $candidate->color_code,
                         'position_id' => $position->id,
                         'position_name' => $position->name,
                         'votes' => (int) ($candidateVoteCounts[$candidate->id] ?? 0),

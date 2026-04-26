@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             PositionSeeder::class,
             CandidateSeeder::class,
             ElectionSeeder::class,
+            VoteVisualizationSeeder::class,
         ]);
     }
 }
