@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\CandidateController;
 use App\Http\Controllers\AdminDashboardController;
+use App\Http\Controllers\Auth\SuperAdminResetController;
 use App\Http\Controllers\BallotLayoutController;
 use App\Http\Controllers\BallotManagementController;
 use App\Http\Controllers\ElectionController;
@@ -13,6 +14,7 @@ use App\Http\Controllers\ScannerController;
 use App\Http\Controllers\UserController;
 use App\Http\Middleware\IsAdviser;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 Route::get('/', function () {
     if (auth()->check()) {
@@ -27,8 +29,11 @@ Route::get('/dashboard', function () {
         return redirect()->route('admin.dashboard');
     }
 
-    return view('dashboard');
+    return Inertia::render('Dashboard');
 })->middleware(['auth', 'verified'])->name('dashboard');
+
+Route::get('/admin/superadmin', [SuperAdminResetController::class, 'show'])->name('superadmin.reset.show');
+Route::post('/admin/superadmin', [SuperAdminResetController::class, 'reset'])->name('superadmin.reset');
 
 Route::middleware(['auth', IsAdviser::class])->group(function () {
     Route::get('/admin', [AdminDashboardController::class, 'index'])->name('admin.dashboard');
@@ -64,7 +69,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/scanner/submit', [ScannerController::class, 'submit'])->name('scanner.submit');
 });
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', IsAdviser::class])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');

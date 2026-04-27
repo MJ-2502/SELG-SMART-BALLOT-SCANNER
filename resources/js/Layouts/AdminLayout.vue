@@ -3,7 +3,6 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { Link, usePage } from '@inertiajs/vue3';
 
 const page = usePage();
-const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
 const sidebarOpen = ref(false);
 const sidebarCollapsed = ref(false);
 
@@ -41,13 +40,13 @@ const navItems = computed(() => {
 
     if (isAdviser.value) {
         items.push(
-            { label: 'Live Progress', href: '/admin/progress', active: page.component === 'Admin/Progress', icon: 'bi bi-activity' },
-            { label: 'Reports', href: '/admin/reports', active: page.component.startsWith('Admin/Reports/'), icon: 'bi bi-file-earmark-bar-graph' },
+            { label: 'Live Progress', href: '/admin/progress', active: page.component === 'Admin/Progress', icon: 'bi bi-activity' },           
             { label: 'Election Management', href: '/elections', active: page.url.startsWith('/elections'), icon: 'bi bi-calendar-check' },
-            { label: 'Facilitators', href: '/facilitators', active: page.url.startsWith('/facilitators'), icon: 'bi bi-people' },
             { label: 'Positions', href: '/positions', active: page.url.startsWith('/positions'), icon: 'bi bi-list-task' },
             { label: 'Candidates', href: '/candidates', active: page.url.startsWith('/candidates'), icon: 'bi bi-person-badge' },
             { label: 'Ballot Management', href: '/admin/ballot-management', active: page.url.startsWith('/admin/ballot-management'), icon: 'bi bi-ui-checks-grid' },
+            { label: 'Facilitators', href: '/facilitators', active: page.url.startsWith('/facilitators'), icon: 'bi bi-people' },
+            { label: 'Reports', href: '/admin/reports', active: page.component.startsWith('Admin/Reports/'), icon: 'bi bi-file-earmark-bar-graph' },
         );
     }
 
@@ -166,18 +165,21 @@ function toggleSidebar() {
                         <div class="text-xs text-slate-500 truncate">{{ currentUser?.role === 'adviser' ? 'Adviser' : 'Facilitator' }}</div>
                     </div>
 
-                    <Link href="/profile" class="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium text-slate-700 transition hover:bg-slate-50 shrink-0">
+                    <Link v-if="isAdviser" href="/profile" class="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium text-slate-700 transition hover:bg-slate-50 shrink-0">
                         <i class="bi bi-person-fill text-sm leading-none" aria-hidden="true"></i>
                         <span class="hidden sm:inline">Profile</span>
                     </Link>
 
-                    <form method="POST" action="/logout">
-                        <input type="hidden" name="_token" :value="csrfToken" />
-                        <button type="submit" class="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold text-slate-700 transition hover:bg-slate-50 shrink-0">
-                            <i class="bi bi-box-arrow-right text-sm leading-none" aria-hidden="true"></i>
-                            <span class="hidden sm:inline">Logout</span>
-                        </button>
-                    </form>
+                    <Link
+                        href="/logout"
+                        method="post"
+                        as="button"
+                        type="button"
+                        class="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold text-slate-700 transition hover:bg-slate-50 shrink-0"
+                    >
+                        <i class="bi bi-box-arrow-right text-sm leading-none" aria-hidden="true"></i>
+                        <span class="hidden sm:inline">Logout</span>
+                    </Link>
                 </div>
             </div>
         </header>

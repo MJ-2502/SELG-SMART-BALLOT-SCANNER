@@ -14,6 +14,7 @@ const user = page.props.auth?.user ?? {};
 
 const profileForm = useForm({
     name: user.name ?? '',
+    username: user.username ?? '',
     email: user.email ?? '',
 });
 
@@ -41,16 +42,6 @@ function updatePassword() {
     });
 }
 
-function deleteAccount() {
-    if (!confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
-        return;
-    }
-
-    deleteForm.delete('/profile', {
-        preserveScroll: true,
-        errorBag: 'userDeletion',
-    });
-}
 </script>
 
 <template>
@@ -60,13 +51,19 @@ function deleteAccount() {
         <div class="space-y-6 max-w-3xl mx-auto">
             <div class="ui-card">
                 <h1 class="text-xl font-semibold mb-2">Profile Information</h1>
-                <p class="text-sm text-slate-600 mb-6">Update your account name and email address.</p>
+                <p class="text-sm text-slate-600 mb-6">Update your account name, username, and email address.</p>
 
                 <form class="space-y-4" @submit.prevent="updateProfile">
                     <div>
                         <label class="block text-sm font-medium mb-1">Name</label>
                         <input v-model="profileForm.name" type="text" class="ui-input" required />
                         <p v-if="profileForm.errors.name" class="mt-1 text-sm text-red-600">{{ profileForm.errors.name }}</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Username</label>
+                        <input v-model="profileForm.username" type="text" class="ui-input" required />
+                        <p v-if="profileForm.errors.username" class="mt-1 text-sm text-red-600">{{ profileForm.errors.username }}</p>
                     </div>
 
                     <div>
@@ -110,21 +107,6 @@ function deleteAccount() {
                     <p v-if="status === 'password-updated'" class="text-sm text-emerald-700">Password updated successfully.</p>
 
                     <button type="submit" class="ui-btn-primary" :disabled="passwordForm.processing">Update Password</button>
-                </form>
-            </div>
-
-            <div class="ui-card border-red-200">
-                <h2 class="text-xl font-semibold mb-2 text-red-700">Delete Account</h2>
-                <p class="text-sm text-slate-600 mb-6">Once deleted, your account cannot be recovered.</p>
-
-                <form class="space-y-4" @submit.prevent="deleteAccount">
-                    <div>
-                        <label class="block text-sm font-medium mb-1">Confirm Password</label>
-                        <input v-model="deleteForm.password" type="password" class="ui-input" required />
-                        <p v-if="deleteForm.errors.password" class="mt-1 text-sm text-red-600">{{ deleteForm.errors.password }}</p>
-                    </div>
-
-                    <button type="submit" class="ui-btn-danger" :disabled="deleteForm.processing">Delete Account</button>
                 </form>
             </div>
         </div>

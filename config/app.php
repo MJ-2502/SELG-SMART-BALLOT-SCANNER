@@ -54,6 +54,8 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    'superadmin_reset_token' => env('SUPERADMIN_RESET_TOKEN'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

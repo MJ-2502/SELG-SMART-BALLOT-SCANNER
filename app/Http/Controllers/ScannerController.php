@@ -12,11 +12,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class ScannerController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
         $user = auth()->user();
 
@@ -42,11 +43,24 @@ class ScannerController extends Controller
             return [$position->id => max(1, (int) ($position->votes_allowed ?? 1))];
         });
 
-        return view('scanner.index', [
-            'elections' => $elections,
-            'positions' => $positions,
+        return Inertia::render('Scanner/Index', [
+            'elections' => $elections->map(fn (Election $election) => [
+                'id' => $election->id,
+                'label' => $election->label,
+            ])->values(),
+            'positions' => $positions->map(fn (Position $position) => [
+                'id' => $position->id,
+                'name' => $position->name,
+                'votes_allowed' => max(1, (int) ($position->votes_allowed ?? 1)),
+                'candidates' => $position->candidates->map(fn (Candidate $candidate) => [
+                    'id' => $candidate->id,
+                    'name' => $candidate->name,
+                ])->values(),
+            ])->values(),
             'serviceUrl' => config('omr.service_url'),
             'layoutCount' => $this->buildBallotLayout($positions)->count(),
+            'scanUrl' => route('scanner.scan'),
+            'submitUrl' => route('scanner.submit'),
         ]);
     }
 

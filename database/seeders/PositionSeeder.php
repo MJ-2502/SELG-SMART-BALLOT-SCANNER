@@ -14,6 +14,10 @@ class PositionSeeder extends Seeder
             ['name' => 'Vice President', 'display_order' => 2],
             ['name' => 'Secretary', 'display_order' => 3],
             ['name' => 'Treasurer', 'display_order' => 4],
+            ['name' => 'Auditor', 'display_order' => 5],
+            ['name' => 'Public Relations Officer', 'display_order' => 6],
+            ['name' => 'Business Manager', 'display_order' => 7],
+            ['name' => 'Representative', 'display_order' => 8]
         ];
 
         foreach ($positions as $position) {
