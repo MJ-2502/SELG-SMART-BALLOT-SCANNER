@@ -3,71 +3,79 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
-use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 class PasswordResetTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_reset_password_link_screen_can_be_rendered(): void
+    public function test_public_forgot_password_routes_are_not_available(): void
     {
-        $response = $this->get('/forgot-password');
-
-        $response->assertStatus(200);
+        $this->get('/forgot-password')->assertNotFound();
+        $this->post('/forgot-password', ['email' => 'adviser@example.test'])->assertNotFound();
     }
 
-    public function test_reset_password_link_can_be_requested(): void
+    public function test_public_reset_password_routes_are_not_available(): void
     {
-        Notification::fake();
-
-        $user = User::factory()->create();
-
-        $this->post('/forgot-password', ['email' => $user->email]);
-
-        Notification::assertSentTo($user, ResetPassword::class);
+        $this->get('/reset-password/fake-token')->assertNotFound();
+        $this->post('/reset-password', [
+            'token' => 'fake-token',
+            'email' => 'adviser@example.test',
+            'password' => 'new-password',
+            'password_confirmation' => 'new-password',
+        ])->assertNotFound();
     }
 
-    public function test_reset_password_screen_can_be_rendered(): void
+    public function test_superadmin_reset_page_requires_valid_token(): void
     {
-        Notification::fake();
+        config()->set('app.superadmin_reset_token', 'valid-secret-token');
 
-        $user = User::factory()->create();
+        $this->get('/admin/superadmin')->assertForbidden();
+        $this->get('/admin/superadmin?token=invalid-secret-token')->assertForbidden();
 
-        $this->post('/forgot-password', ['email' => $user->email]);
+        $response = $this->get('/admin/superadmin?token=valid-secret-token');
 
-        Notification::assertSentTo($user, ResetPassword::class, function ($notification) {
-            $response = $this->get('/reset-password/'.$notification->token);
-
-            $response->assertStatus(200);
-
-            return true;
-        });
+        $response->assertOk();
     }
 
-    public function test_password_can_be_reset_with_valid_token(): void
+    public function test_superadmin_reset_updates_adviser_password_with_valid_token(): void
     {
-        Notification::fake();
+        config()->set('app.superadmin_reset_token', 'valid-secret-token');
 
-        $user = User::factory()->create();
+        $adviser = User::factory()->create([
+            'role' => User::ROLE_ADVISER,
+            'password' => Hash::make('old-password'),
+        ]);
 
-        $this->post('/forgot-password', ['email' => $user->email]);
+        $response = $this->post('/admin/superadmin', [
+            'token' => 'valid-secret-token',
+            'password' => 'new-secure-password',
+            'password_confirmation' => 'new-secure-password',
+        ]);
 
-        Notification::assertSentTo($user, ResetPassword::class, function ($notification) use ($user) {
-            $response = $this->post('/reset-password', [
-                'token' => $notification->token,
-                'email' => $user->email,
-                'password' => 'password',
-                'password_confirmation' => 'password',
-            ]);
+        $response->assertRedirect(route('login'));
+        $response->assertSessionHas('status', 'Adviser password has been reset successfully.');
 
-            $response
-                ->assertSessionHasNoErrors()
-                ->assertRedirect(route('login'));
+        $adviser->refresh();
+        $this->assertTrue(Hash::check('new-secure-password', $adviser->password));
+    }
 
-            return true;
-        });
+    public function test_superadmin_reset_rejects_invalid_submit_token(): void
+    {
+        config()->set('app.superadmin_reset_token', 'valid-secret-token');
+
+        User::factory()->create([
+            'role' => User::ROLE_ADVISER,
+        ]);
+
+        $response = $this->post('/admin/superadmin', [
+            'token' => 'wrong-token',
+            'password' => 'new-secure-password',
+            'password_confirmation' => 'new-secure-password',
+        ]);
+
+        $response->assertForbidden();
     }
 }

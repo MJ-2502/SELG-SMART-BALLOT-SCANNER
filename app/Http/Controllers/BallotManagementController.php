@@ -6,16 +6,22 @@ use App\Models\Ballot;
 use App\Models\Election;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class BallotManagementController extends Controller
 {
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $elections = Election::query()
             ->orderByDesc('election_date')
             ->withCount('ballots')
-            ->get();
+            ->get()
+            ->map(function (Election $election) {
+                $election->setAttribute('election_date_formatted', $election->election_date?->format('F j, Y g:i A'));
+
+                return $election;
+            });
 
         $selectedElectionId = (int) $request->integer('election');
 
@@ -34,13 +40,21 @@ class BallotManagementController extends Controller
             ->paginate(25)
             ->withQueryString();
 
+        $ballots->setCollection(
+            $ballots->getCollection()->map(function (Ballot $ballot) {
+                $ballot->setAttribute('scanned_at_formatted', $ballot->scanned_at?->format('M j, Y g:i A'));
+
+                return $ballot;
+            })
+        );
+
         $statusCounts = Ballot::query()
             ->selectRaw('status, COUNT(*) as total')
             ->where('election_id', $selectedElection?->id)
             ->groupBy('status')
             ->pluck('total', 'status');
 
-        return view('admin.ballot-management.index', [
+        return Inertia::render('Admin/BallotManagement/Index', [
             'elections' => $elections,
             'selectedElection' => $selectedElection,
             'ballots' => $ballots,

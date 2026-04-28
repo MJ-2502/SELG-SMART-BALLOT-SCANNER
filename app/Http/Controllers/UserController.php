@@ -7,23 +7,24 @@ use App\Http\Requests\UpdateUserRequest;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Str;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class UserController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
         $users = User::query()
             ->where('role', User::ROLE_FACILITATOR)
             ->orderBy('name')
             ->get();
 
-        return view('admin.users.index', compact('users'));
+        return Inertia::render('Admin/Users/Index', compact('users'));
     }
 
-    public function create(): View
+    public function create(): Response
     {
-        return view('admin.users.create');
+        return Inertia::render('Admin/Users/Create');
     }
 
     public function store(StoreUserRequest $request): RedirectResponse
@@ -42,11 +43,11 @@ class UserController extends Controller
             ->with('status', 'Facilitator account created successfully.');
     }
 
-    public function edit(User $facilitator): View
+    public function edit(User $facilitator): Response
     {
         abort_if($facilitator->role !== User::ROLE_FACILITATOR, 404);
 
-        return view('admin.users.edit', ['user' => $facilitator]);
+        return Inertia::render('Admin/Users/Edit', ['user' => $facilitator]);
     }
 
     public function update(UpdateUserRequest $request, User $facilitator): RedirectResponse

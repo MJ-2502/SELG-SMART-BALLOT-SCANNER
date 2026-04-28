@@ -6,11 +6,12 @@ use App\Models\Ballot;
 use App\Models\Election;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class ElectionProgressController extends Controller
 {
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $elections = Election::query()
             ->orderByDesc('election_date')
@@ -45,7 +46,7 @@ class ElectionProgressController extends Controller
 
         $throughputWindows = $this->buildThroughputSeries($ballotBaseQuery);
 
-        return view('admin.progress.index', [
+        return Inertia::render('Admin/Progress', [
             'elections' => $elections,
             'selectedElection' => $selectedElection,
             'metrics' => $metrics,

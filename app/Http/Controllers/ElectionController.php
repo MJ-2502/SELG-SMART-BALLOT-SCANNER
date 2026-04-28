@@ -8,34 +8,40 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class ElectionController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
         $elections = Election::query()
             ->with('facilitators:id,name,username,grade_level')
             ->withCount('ballots')
             ->orderByDesc('election_date')
-            ->get();
+            ->get()
+            ->map(function (Election $election) {
+                $election->setAttribute('election_date_formatted', $election->election_date?->format('F j, Y g:i A'));
+
+                return $election;
+            });
 
         $facilitators = User::query()
             ->where('role', User::ROLE_FACILITATOR)
             ->orderBy('name')
             ->get(['id', 'name', 'username', 'grade_level']);
 
-        return view('admin.elections.index', compact('elections', 'facilitators'));
+        return Inertia::render('Admin/Elections/Index', compact('elections', 'facilitators'));
     }
 
-    public function create(): View
+    public function create(): Response
     {
         $facilitators = User::query()
             ->where('role', User::ROLE_FACILITATOR)
             ->orderBy('name')
             ->get(['id', 'name', 'username', 'grade_level']);
 
-        return view('admin.elections.create', compact('facilitators'));
+        return Inertia::render('Admin/Elections/Create', compact('facilitators'));
     }
 
     public function store(Request $request): RedirectResponse

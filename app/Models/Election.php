@@ -13,6 +13,10 @@ class Election extends Model
 {
     use HasFactory;
 
+    protected $appends = [
+        'label',
+    ];
+
     protected $fillable = [
         'election_name',
         'election_date',
