@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreBallotGenerationRequest;
 use App\Models\Ballot;
-use App\Models\Candidate;
 use App\Models\Election;
 use App\Models\Position;
 use Illuminate\Http\RedirectResponse;
@@ -63,37 +62,7 @@ class BallotLayoutController extends Controller
             }
 
             if (! $election) {
-                return [
-                    'error' => 'No target election found. Select or start an election first.',
-                    'election_id' => $requestedElectionId,
-                ];
-            }
-
-            $hasActiveCandidates = Candidate::query()
-                ->where('is_active', true)
-                ->exists();
-
-            $hasActivePartylist = Candidate::query()
-                ->where('is_active', true)
-                ->whereNotNull('party')
-                ->whereRaw("TRIM(party) <> ''")
-                ->exists();
-
-            if (! $hasActiveCandidates || ! $hasActivePartylist) {
-                $missing = [];
-                if (! $hasActiveCandidates) {
-                    $missing[] = 'candidates';
-                }
-                if (! $hasActivePartylist) {
-                    $missing[] = 'partylist';
-                }
-
-                $missingLabel = implode(' and ', $missing);
-
-                return [
-                    'error' => "Before generating ballots for this election, add active {$missingLabel} first in Candidate Management.",
-                    'election_id' => $election->id,
-                ];
+                return null;
             }
 
             $targetCount = (int) $validated['print_count'];
@@ -127,10 +96,10 @@ class BallotLayoutController extends Controller
             ];
         });
 
-        if (isset($result['error'])) {
+        if (! $result) {
             return redirect()
-                ->route('admin.ballot-generator.index', array_filter(['election' => $result['election_id'] ?? $requestedElectionId]))
-                ->withErrors(['target_election' => $result['error']]);
+                ->route('admin.ballot-generator.index', array_filter(['election' => $requestedElectionId]))
+                ->withErrors(['target_election' => 'No target election found. Select or start an election first.']);
         }
 
         return redirect()
@@ -167,9 +136,6 @@ class BallotLayoutController extends Controller
         }
 
         $ballots = $ballotsQuery->get();
-
-        $election->setAttribute('election_year', $election->election_date?->format('Y') ?? now()->format('Y'));
-        $election->setAttribute('election_date_formatted', $election->election_date?->format('F j, Y'));
 
         $positions = Position::query()
             ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])

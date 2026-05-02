@@ -72,14 +72,14 @@ const printBallots = () => {
                 <section class="sheet" :class="`per-${perSheet}`">
                     <article v-for="ballot in sheet" :key="ballot.id" class="ballot-page">
                         <div class="ballot-zoom">
-                            <div class="marker tl"></div>
-                            <div class="marker tr"></div>
-                            <div class="marker bl"></div>
-                            <div class="marker br"></div>
-
                             <div class="ballot-content" :style="{ '--paper-margin': `${paperMargin}mm`, '--marker-size': `${markerSize}mm`, '--marker-offset': `${markerOffset}mm`, '--bubble-size': `${bubbleSize}mm`, '--paper-width-mm': paperWidthMm, '--paper-height-mm': paperHeightMm, '--ballot-scale': scale, '--base-content-scale': contentScale, '--content-scale': contentScale }">
-                                <div class="official-ballot">
-                                    <div class="ballot-main">
+                                <div class="ballot-main-shell">
+                                    <div class="marker tl"></div>
+                                    <div class="marker tr"></div>
+                                    <div class="marker bl"></div>
+                                    <div class="marker br"></div>
+                                    <div class="official-ballot">
+                                        <div class="ballot-main">
                                         <div class="ballot-top-number">Ballot Number: {{ formatBallotNumber(ballot.ballot_number) }}</div>
 
                                         <div class="ballot-head">
@@ -117,7 +117,8 @@ const printBallots = () => {
                                             </section>
                                         </div>
 
-                                        <div class="footer-note">Election ID {{ election.id }} · UUID {{ ballot.uuid }}</div>
+                                      
+                                        </div>
                                     </div>
                                 </div>
 
@@ -285,12 +286,18 @@ const printBallots = () => {
     width: var(--marker-size);
     height: var(--marker-size);
     background: #000000;
+    z-index: 2;
 }
 
-.marker.tl { top: var(--marker-offset); left: var(--marker-offset); }
-.marker.tr { top: var(--marker-offset); right: var(--marker-offset); }
-.marker.bl { bottom: var(--marker-offset); left: var(--marker-offset); }
-.marker.br { bottom: var(--marker-offset); right: var(--marker-offset); }
+.marker.tl { top: calc(-1 * var(--marker-offset)); left: calc(-1 * var(--marker-offset)); }
+.marker.tr { top: calc(-1 * var(--marker-offset)); right: calc(-1 * var(--marker-offset)); }
+.marker.bl { bottom: calc(-1 * var(--marker-offset)); left: calc(-1 * var(--marker-offset)); }
+.marker.br { bottom: calc(-1 * var(--marker-offset)); right: calc(-1 * var(--marker-offset)); }
+
+.ballot-main-shell {
+    position: relative;
+    margin-bottom: calc(4mm * var(--content-scale));
+}
 
 .official-ballot {
     border: 1.5px solid #111827;
@@ -511,8 +518,16 @@ const printBallots = () => {
 }
 
 @media print {
+    @page {
+        size: A4;
+        margin: 0;
+    }
+
+    :global(html),
     :global(body) {
         background: #ffffff;
+        margin: 0;
+        padding: 0;
     }
 
     .toolbar {

@@ -15,7 +15,7 @@ class BubbleCandidate(BaseModel):
     candidate_party: Optional[str] = Field(None, description="Candidate party")
     position_id: int = Field(..., description="Position ID this candidate is running for")
     position_name: Optional[str] = Field(None, description="Position name")
-    position_vote_limit: int = Field(1, description="Maximum allowed votes for this position")
+    is_placeholder: Optional[bool] = Field(False, description="Spacer slot for empty positions")
 
 
 class ScanRequest(BaseModel):
@@ -54,7 +54,11 @@ class ScanResponse(BaseModel):
     )
     processed_preview_image: Optional[str] = Field(
         default=None,
-        description="Processed ballot preview image after normalization (base64 data URL)",
+        description="Deskewed and preprocessed ballot image (base64 data URL) — shown in the review modal",
+    )
+    warp_strategy: Optional[str] = Field(
+        default=None,
+        description="Which crop/warp strategy succeeded: 'anchors', 'adaptive_contour', 'canny_contour', or 'none'",
     )
 
 

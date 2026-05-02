@@ -12,7 +12,9 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ScannerController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Middleware\IsAdviser;
+use App\Models\Election;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -25,11 +27,37 @@ Route::get('/', function () {
 });
 
 Route::get('/dashboard', function () {
-    if (auth()->user()?->isAdviser()) {
+    $user = auth()->user();
+
+    if ($user?->isAdviser()) {
         return redirect()->route('admin.dashboard');
     }
 
-    return Inertia::render('Dashboard');
+    // Fetch elections assigned to this facilitator via the pivot table
+    // or the legacy facilitator_id column, matching ScannerController::canScanElection()
+    $assignedElections = Election::query()
+        ->where(function ($query) use ($user) {
+            $query->whereHas('facilitators', fn ($q) => $q->where('users.id', $user->id))
+                  ->orWhere('facilitator_id', $user->id);
+        })
+        ->withCount([
+            'ballots as total_ballots',
+            'ballots as scanned_ballots' => fn ($q) => $q->where('status', 'scanned'),
+        ])
+        ->orderByDesc('election_date')
+        ->get()
+        ->map(fn (Election $e) => [
+            'id'              => $e->id,
+            'election_name'   => $e->election_name,
+            'election_date'   => $e->election_date?->toISOString(),
+            'status'          => $e->status,
+            'total_ballots'   => $e->total_ballots,
+            'scanned_ballots' => $e->scanned_ballots,
+        ]);
+
+    return Inertia::render('Dashboard', [
+        'assignedElections' => $assignedElections,
+    ]);
 })->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::get('/admin/superadmin', [SuperAdminResetController::class, 'show'])->name('superadmin.reset.show');
@@ -69,10 +97,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/scanner/submit', [ScannerController::class, 'submit'])->name('scanner.submit');
 });
 
-Route::middleware(['auth', IsAdviser::class])->group(function () {
+Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
 require __DIR__.'/auth.php';

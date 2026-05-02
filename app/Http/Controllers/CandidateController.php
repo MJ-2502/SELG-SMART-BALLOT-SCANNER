@@ -103,7 +103,7 @@ class CandidateController extends Controller
             ->map(fn ($name) => trim((string) $name))
             ->filter(fn ($name) => $name !== '');
 
-        $result = DB::transaction(function () use ($entries, $party, $isActive) {
+        $result = DB::transaction(function () use ($entries, $party, $isActive, $colorCode) {
             $created = 0;
             $updated = 0;
 

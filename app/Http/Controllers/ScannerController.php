@@ -39,6 +39,12 @@ class ScannerController extends Controller
             ->orderBy('name')
             ->get();
 
+        $layoutPositions = Position::query()
+            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
+            ->orderBy('display_order')
+            ->orderBy('name')
+            ->get();
+
         $positionVoteLimits = $positions->mapWithKeys(function ($position) {
             return [$position->id => max(1, (int) ($position->votes_allowed ?? 1))];
         });
@@ -58,7 +64,7 @@ class ScannerController extends Controller
                 ])->values(),
             ])->values(),
             'serviceUrl' => config('omr.service_url'),
-            'layoutCount' => $this->buildBallotLayout($positions)->count(),
+            'layoutCount' => $this->buildBallotLayout($layoutPositions)->count(),
             'scanUrl' => route('scanner.scan'),
             'submitUrl' => route('scanner.submit'),
         ]);
@@ -87,13 +93,17 @@ class ScannerController extends Controller
             ->orderBy('name')
             ->get();
 
+        $layoutPositions = Position::query()
+            ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
+            ->orderBy('display_order')
+            ->orderBy('name')
+            ->get();
+
         $positionVoteLimits = $positions->mapWithKeys(fn ($position) => [
             $position->id => max(1, (int) ($position->votes_allowed ?? 1)),
         ]);
 
-        $ballotLayout = $this->buildBallotLayout($positions);
-
-        if ($ballotLayout->isEmpty()) {
+        if ($positions->isEmpty()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No active candidates are configured yet.',
@@ -104,6 +114,8 @@ class ScannerController extends Controller
                 'errors' => ['Configure positions and active candidates before scanning.'],
             ], 422);
         }
+
+        $ballotLayout = $this->buildBallotLayout($layoutPositions);
 
         $image = $request->file('ballot_image');
         $imageContents = (string) file_get_contents($image->getRealPath());
@@ -435,9 +447,25 @@ class ScannerController extends Controller
 
     private function buildBallotLayout($positions)
     {
-        return $positions->flatMap(function ($position, int $rowIndex) {
+        return $positions->values()->flatMap(function ($position, int $rowIndex) {
             $positionVoteLimit = max(1, (int) ($position->votes_allowed ?? 1));
-            return $position->candidates->values()->map(function ($candidate, int $colIndex) use ($position, $rowIndex, $positionVoteLimit) {
+            $candidates = $position->candidates ?? collect();
+
+            if ($candidates->isEmpty()) {
+                return [[
+                    'row' => $rowIndex,
+                    'col' => 0,
+                    'candidate_id' => 0,
+                    'candidate_name' => 'NO_CANDIDATE',
+                    'candidate_party' => null,
+                    'position_id' => $position->id,
+                    'position_name' => $position->name,
+                    'position_vote_limit' => $positionVoteLimit,
+                    'is_placeholder' => true,
+                ]];
+            }
+
+            return $candidates->values()->map(function ($candidate, int $colIndex) use ($position, $rowIndex, $positionVoteLimit) {
                 return [
                     'row' => $rowIndex,
                     'col' => $colIndex,
@@ -447,6 +475,7 @@ class ScannerController extends Controller
                     'position_id' => $position->id,
                     'position_name' => $position->name,
                     'position_vote_limit' => $positionVoteLimit,
+                    'is_placeholder' => false,
                 ];
             });
         })->values();

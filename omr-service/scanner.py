@@ -1,1415 +1,852 @@
 """
-Core scanning logic with OpenCV for marker detection, perspective correction,
-and bubble detection.
+OMR Scanner — clean rewrite based on the actual ballot structure.
+
+BALLOT LAYOUT (from generated PDF):
+- 8 positions, each with 2 candidates (FORWARD then UNITY)
+- Candidates stack vertically within each position block
+- Each position block has a shaded header row + candidate rows
+- Bubbles are in the leftmost ~8% of the page width
+- The ballot has 4 corner anchor squares (solid black squares, ~6mm)
+- A tear-line separates the ballot from the voter stub
+
+APPROACH:
+1. Preprocess: deskew + normalize lighting (CLAHE)
+2. Detect the ballot page boundary via contour or anchor squares
+3. For each bubble slot, compute a clean "fill score" using two signals:
+   a. Mean darkness inside the bubble circle (inverted grayscale)
+   b. Ratio of dark pixels exceeding an adaptive threshold
+4. Per-position winner selection with a clear confidence gap requirement
+5. Multi-vote positions use a ranked threshold approach
 """
 
 import base64
+import time
+from typing import Dict, List, Optional, Tuple
+
 import cv2
 import numpy as np
-import time
-from typing import List, Tuple, Optional, Dict
-from models import DetectedVote, BubbleCandidate, ScanResponse
-from config import MARKER_CONFIG, BUBBLE_SIZE, HSV_LOWER, HSV_UPPER
+
+from models import BubbleCandidate, DetectedVote, ScanResponse
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Fraction of image width for the bubble column
+# Bubbles sit at ~3.5% of ballot width — keep lane narrow to avoid text
+BUBBLE_LANE_LEFT_FRAC  = 0.00
+BUBBLE_LANE_RIGHT_FRAC = 0.09   # was 0.10 — too wide, caught position headers
+
+# After _warp_to_ballot the ballot fills the frame — skip the very top
+# (ballot-number row + election header block) and the very bottom (tear line)
+# These are FRACTIONS of ballot height — works at any resolution after warp
+SCAN_TOP_FRAC    = 0.06
+SCAN_BOTTOM_FRAC = 0.97
+
+# Additional top skip expressed as a FRACTION of ballot height (not fixed px)
+# The ballot header (number + election name + instructions) is ~12% of height
+# SCAN_TOP_FRAC already accounts for 6%, this adds another 6% = 12% total
+SCAN_TOP_PAD_FRAC  = 0.165   # replaces SCAN_TOP_PAD_PX = 100 (unreliable fixed px)
+SCAN_TOP_PAD_PX    = 0      # kept for backwards compat — set to 0, use frac instead
+SCAN_BOTTOM_PAD_PX = 0
+
+# Bubble radius: after warp the ballot fills the frame so calibrate against
+# ballot height. A4 ballot: bubble ~3.5mm, page ~297mm → 3.5/297 ≈ 0.012
+# We use min(h,w) so portrait and landscape both work
+BUBBLE_RADIUS_FRAC = 0.012   # was 0.008 — too small after warp
+
+# Fill threshold — a shaded bubble typically scores 0.25–0.60
+FILL_THRESHOLD   = 0.22    # lowered from 0.28 — catches light pen marks
+MIN_GAP_SINGLE   = 0.06    # lowered from 0.08 — less strict gap requirement
+FILL_FLOOR_MULTI = 0.18    # lowered from 0.22
 
 
 class BallotScanner:
-    """Main scanner class for OMR ballot processing."""
-    
-    def __init__(self):
-        self.image = None
-        self.original_image = None
-        self.warped_image = None
-        self.processed_image = None
-        self.detected_markers = []
-        self.debug_bubbles = []
-        self.debug_visualization_image = None
-        self.processed_preview_image = None
-        self.detection_threshold = 0.40
+    """Main scanner: load → preprocess → detect bubbles → return votes."""
 
-    @staticmethod
-    def _encode_preview_image(image: Optional[np.ndarray], quality: int = 88) -> Optional[str]:
-        """Encode image as data URL for lightweight frontend preview."""
-        if image is None or image.size == 0:
-            return None
-        ok, buffer = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
-        if not ok:
-            return None
-        encoded = base64.b64encode(buffer).decode("utf-8")
-        return f"data:image/jpeg;base64,{encoded}"
+    def __init__(self) -> None:
+        self.image: Optional[np.ndarray] = None
+        self.debug_bubbles: List[Dict] = []
+        self.debug_visualization_image: Optional[str] = None
+        self.processed_preview_image: Optional[str] = None
 
-    @staticmethod
-    def _order_quad_points(points: np.ndarray) -> np.ndarray:
-        """Return points in TL, TR, BR, BL order for perspective transform."""
-        rect = np.zeros((4, 2), dtype="float32")
-        sums = points.sum(axis=1)
-        rect[0] = points[np.argmin(sums)]
-        rect[2] = points[np.argmax(sums)]
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-        diffs = np.diff(points, axis=1)
-        rect[1] = points[np.argmin(diffs)]
-        rect[3] = points[np.argmax(diffs)]
-        return rect
+    def scan(
+        self,
+        image_base64: str,
+        bubble_candidates: List[BubbleCandidate],
+    ) -> ScanResponse:
+        t0 = time.time()
 
-    def _normalize_ballot_image(self, image: np.ndarray) -> np.ndarray:
-        """Apply document-style normalization similar to mobile scan apps."""
-        if image is None or image.size == 0:
-            return image
+        if not self._load_base64(image_base64):
+            return self._error_response("Failed to load image", t0)
 
-        height, width = image.shape[:2]
-        image_area = float(height * width)
+        if self.image is None or self.image.size == 0:
+            return self._error_response("Empty image", t0)
 
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blurred, 60, 180)
-        edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
-        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=1)
+        # 1. Preprocess
+        self.image = self._preprocess(self.image)
+        self.processed_preview_image = self._encode_jpg(self.image)
 
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:12]
+        # 2. Detect bubbles
+        detected = self._detect_bubbles(bubble_candidates)
 
-        warped = image
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area < (image_area * 0.18):
-                continue
+        # 3. Build debug overlay
+        self.debug_visualization_image = self._build_debug_overlay(
+            self.image, self.debug_bubbles
+        )
 
-            perimeter = cv2.arcLength(contour, True)
-            if perimeter <= 0:
-                continue
+        ms = (time.time() - t0) * 1000
+        quality = self._image_quality(self.image)
 
-            approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+        return ScanResponse(
+            success=len(detected) > 0,
+            message="Scan completed." if detected else "No marks detected.",
+            detected_votes=detected,
+            image_quality=quality,
+            markers_detected=0,
+            processing_time_ms=ms,
+            errors=[],
+            debug_bubbles=self.debug_bubbles,
+            debug_visualization_image=self.debug_visualization_image,
+            processed_preview_image=self.processed_preview_image,
+        )
+
+    # ------------------------------------------------------------------
+    # Step 1: Image loading
+    # ------------------------------------------------------------------
+
+    def _load_base64(self, b64: str) -> bool:
+        try:
+            if "," in b64:
+                b64 = b64.split(",", 1)[1]
+            data = base64.b64decode(b64)
+            arr = np.frombuffer(data, np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None or img.size == 0:
+                return False
+            self.image = img
+            return True
+        except Exception:
+            return False
+
+    # ------------------------------------------------------------------
+    # Step 2: Preprocessing
+    # ------------------------------------------------------------------
+
+    def _preprocess(self, img: np.ndarray) -> np.ndarray:
+        """
+        1. Try to find the ballot page boundary and warp to it.
+        2. Deskew using Hough lines.
+        3. Enhance local contrast with CLAHE.
+        """
+        img = self._warp_to_ballot(img)
+        img = self._deskew(img)
+        img = self._clahe_enhance(img)
+        return img
+
+    def _warp_to_ballot(self, img: np.ndarray) -> np.ndarray:
+        """
+        Find the largest near-rectangular contour that could be the ballot
+        page and warp to it. If nothing suitable is found, return unchanged.
+        Handles both portrait (tall) and landscape ballot orientations.
+        """
+        h, w = img.shape[:2]
+        area = h * w
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blur, 50, 150)
+        edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
+
+        contours, _ = cv2.findContours(
+            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:8]
+
+        for cnt in contours:
+            cnt_area = cv2.contourArea(cnt)
+            if cnt_area < area * 0.15:
+                break
+
+            peri = cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
             if len(approx) != 4:
                 continue
 
-            quad = approx.reshape(4, 2).astype("float32")
-            rect = self._order_quad_points(quad)
+            pts = approx.reshape(4, 2).astype("float32")
+            rect = self._order_points(pts)
 
-            width_a = np.linalg.norm(rect[2] - rect[3])
-            width_b = np.linalg.norm(rect[1] - rect[0])
-            height_a = np.linalg.norm(rect[1] - rect[2])
-            height_b = np.linalg.norm(rect[0] - rect[3])
+            wa = float(np.linalg.norm(rect[1] - rect[0]))
+            wb = float(np.linalg.norm(rect[2] - rect[3]))
+            ha = float(np.linalg.norm(rect[3] - rect[0]))
+            hb = float(np.linalg.norm(rect[2] - rect[1]))
+            tw = int(max(wa, wb))
+            th = int(max(ha, hb))
 
-            target_w = int(max(width_a, width_b))
-            target_h = int(max(height_a, height_b))
-
-            if target_w < int(width * 0.35) or target_h < int(height * 0.35):
+            if tw < w * 0.25 or th < h * 0.25:
                 continue
 
-            aspect_ratio = float(target_w) / float(max(1, target_h))
-            if not (0.35 <= aspect_ratio <= 1.25):
+            ar = tw / max(1, th)
+            # Accept portrait (tall, ar < 1) and landscape (wide, ar > 1)
+            # Ballot is A4-ish so portrait ar ~ 0.70, landscape ~ 1.41
+            # Widen the gate to 0.20–2.0 to avoid rejecting slightly mis-detected corners
+            if not (0.20 <= ar <= 2.0):
                 continue
 
             dst = np.array(
-                [
-                    [0, 0],
-                    [target_w - 1, 0],
-                    [target_w - 1, target_h - 1],
-                    [0, target_h - 1],
-                ],
+                [[0, 0], [tw - 1, 0], [tw - 1, th - 1], [0, th - 1]],
                 dtype="float32",
             )
-            matrix = cv2.getPerspectiveTransform(rect, dst)
-            warped_candidate = cv2.warpPerspective(image, matrix, (target_w, target_h))
+            M = cv2.getPerspectiveTransform(rect, dst)
+            warped = cv2.warpPerspective(img, M, (tw, th))
+            return warped
 
-            if warped_candidate is not None and warped_candidate.size > 0:
-                warped = warped_candidate
-                break
+        return img
 
-        # Auto-deskew using long horizontal ballot lines to stabilize bubble alignment.
-        deskew_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-        deskew_edges = cv2.Canny(deskew_gray, 70, 180)
+    def _deskew(self, img: np.ndarray) -> np.ndarray:
+        """
+        Correct small rotation via Hough line analysis.
+
+        Phone photos of portrait ballots produce mostly near-vertical edges
+        (columns, ballot borders) — not near-horizontal ones. The original
+        code only accepted abs(deg) <= 10 which filtered out all vertical
+        lines (deg ~±80–90°) leaving angles[] empty → no correction applied.
+
+        Fix: normalize every line angle to its deviation from the nearest
+        axis (horizontal OR vertical), take the median deviation, then
+        rotate by that small amount. Max correction ±15° from either axis.
+        """
+        h, w = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
         lines = cv2.HoughLinesP(
-            deskew_edges,
-            rho=1,
-            theta=np.pi / 180,
-            threshold=120,
-            minLineLength=max(80, int(warped.shape[1] * 0.35)),
-            maxLineGap=14,
+            edges,
+            1,
+            np.pi / 180,
+            threshold=80,
+            minLineLength=int(min(w, h) * 0.20),  # accept shorter lines too
+            maxLineGap=20,
+        )
+        if lines is None:
+            return img
+
+        deviations = []
+        for line in lines[:300]:
+            x1, y1, x2, y2 = line[0]
+            dx, dy = float(x2 - x1), float(y2 - y1)
+            if abs(dx) < 1 and abs(dy) < 1:
+                continue
+
+            # Angle from horizontal in degrees, range (-90, 90]
+            deg = float(np.degrees(np.arctan2(dy, dx)))
+
+            # Normalize to deviation from nearest axis:
+            #   near-horizontal lines: dev = deg itself (small)
+            #   near-vertical lines:   dev = deg - sign(deg)*90 (small)
+            if abs(deg) <= 45.0:
+                dev = deg           # deviation from horizontal
+            else:
+                dev = deg - (90.0 if deg > 0 else -90.0)  # deviation from vertical
+
+            # Only accept deviations within ±15° (genuine skew, not random noise)
+            if abs(dev) <= 15.0:
+                deviations.append(dev)
+
+        if not deviations:
+            return img
+
+        angle = float(np.median(deviations))
+
+        # Skip trivially small corrections
+        if abs(angle) < 0.3:
+            return img
+
+        M = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), -angle, 1.0)
+        return cv2.warpAffine(
+            img, M, (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REPLICATE,
         )
 
-        if lines is not None and len(lines) > 0:
-            angles = []
-            for line in lines[:300]:
-                x1, y1, x2, y2 = line[0]
-                dx = float(x2 - x1)
-                dy = float(y2 - y1)
-                if abs(dx) < 1e-6:
-                    continue
-                angle_deg = float(np.degrees(np.arctan2(dy, dx)))
-                # Keep only near-horizontal lines for reliable skew estimation.
-                if abs(angle_deg) <= 15.0:
-                    angles.append(angle_deg)
+    @staticmethod
+    def _clahe_enhance(img: np.ndarray) -> np.ndarray:
+        """Improve local contrast so faint pen marks become detectable."""
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l = clahe.apply(l)
+        return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
 
-            if angles:
-                median_angle = float(np.median(np.array(angles, dtype=float)))
-                if 0.20 <= abs(median_angle) <= 8.0:
-                    h, w = warped.shape[:2]
-                    center = (w / 2.0, h / 2.0)
-                    rot_mat = cv2.getRotationMatrix2D(center, -median_angle, 1.0)
-                    warped = cv2.warpAffine(
-                        warped,
-                        rot_mat,
-                        (w, h),
-                        flags=cv2.INTER_LINEAR,
-                        borderMode=cv2.BORDER_REPLICATE,
-                    )
+    @staticmethod
+    def _order_points(pts: np.ndarray) -> np.ndarray:
+        rect = np.zeros((4, 2), dtype="float32")
+        s = pts.sum(axis=1)
+        rect[0] = pts[np.argmin(s)]   # top-left
+        rect[2] = pts[np.argmax(s)]   # bottom-right
+        d = np.diff(pts, axis=1)
+        rect[1] = pts[np.argmin(d)]   # top-right
+        rect[3] = pts[np.argmax(d)]   # bottom-left
+        return rect
 
-        # Local contrast enhancement for cleaner mark separation.
-        lab = cv2.cvtColor(warped, cv2.COLOR_BGR2LAB)
-        l_channel, a_channel, b_channel = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.4, tileGridSize=(8, 8))
-        l_channel = clahe.apply(l_channel)
-        enhanced_lab = cv2.merge((l_channel, a_channel, b_channel))
-        enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
-        return enhanced
-        
-    def load_image_base64(self, base64_string: str) -> bool:
-        """Load image from base64 encoded string."""
-        try:
-            # Remove data URL prefix if present
-            if "," in base64_string:
-                base64_string = base64_string.split(",")[1]
-            
-            image_data = base64.b64decode(base64_string)
-            nparr = np.frombuffer(image_data, np.uint8)
-            self.image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            self.original_image = self.image.copy()
-            
-            if self.image is None:
-                return False
-            return True
-        except Exception as e:
-            print(f"Error loading image: {e}")
-            return False
-    
-    def detect_markers(self) -> Tuple[List[Tuple[int, int]], int]:
-        """
-        Markers are no longer used for perspective correction.
-        Returns empty list for compatibility.
-        """
-        self.detected_markers = []
-        return self.detected_markers, 0
-    
-    def perspective_warp(self) -> bool:
-        """
-        Perspective warp is no longer used (markers removed).
-        Returns False for compatibility.
-        """
-        return False
-    
-    def detect_bubbles(self, bubble_candidates: List[BubbleCandidate]) -> List[DetectedVote]:
-        """
-        Detect marked bubbles using geometry, ring detection, and fill scoring.
-        """
-        detected_votes = []
-        self.debug_bubbles = []
-        
-        if not bubble_candidates:
-            return detected_votes
-        
-        image_to_scan = self.image
-        height, width = image_to_scan.shape[:2]
-        
-        gray = cv2.cvtColor(image_to_scan, cv2.COLOR_BGR2GRAY)
-        hsv = cv2.cvtColor(image_to_scan, cv2.COLOR_BGR2HSV)
-        
-        lower = np.array(HSV_LOWER)
-        upper = np.array(HSV_UPPER)
-        dark_mask = cv2.inRange(hsv, lower, upper)
+    # ------------------------------------------------------------------
+    # Step 3: Bubble detection
+    # ------------------------------------------------------------------
 
-        # Use a stricter mask for fill scoring so page gray/noise does not look like shading.
-        local_dark = cv2.adaptiveThreshold(
-            gray,
-            255,
+    def _detect_bubbles(
+        self, candidates: List[BubbleCandidate]
+    ) -> List[DetectedVote]:
+        """
+        Core detection pipeline:
+        1. Build grayscale + global adaptive threshold map.
+        2. Compute bubble radius from image dimensions.
+        3. Estimate X center of bubble lane via HoughCircles.
+        4. Detect Y positions of printed bubble rings.
+        5. Map candidates to pixel coordinates (proportional layout-aware).
+        6. Score each bubble using global threshold map.
+        7. Per-position winner selection.
+        """
+        if not candidates:
+            return []
+
+        h, w = self.image.shape[:2]
+        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+
+        # Compute global adaptive threshold ONCE — used by all _fill_score calls.
+        # Block size must be odd and large enough to cover a bubble + surroundings.
+        bubble_r = max(8, int(min(h, w) * BUBBLE_RADIUS_FRAC))
+        block = max(11, (bubble_r * 4) | 1)  # ensure odd
+        global_thresh = cv2.adaptiveThreshold(
+            gray, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV,
-            31,
-            9,
+            block, 8,
         )
-        score_dark_mask = cv2.bitwise_and(dark_mask, local_dark)
-        score_dark_mask = cv2.medianBlur(score_dark_mask, 3)
 
-        scan_y_min = int(height * 0.12)
-        scan_y_max = int(height * 0.995)
+        # ---- locate the bubble lane X center ----
+        lane_cx = self._estimate_lane_cx(gray, w, h, bubble_r)
 
-        # Detect section bands early so scan scope can be applied per section.
-        line_section_bands = []
-        border_roi = gray[:, : int(width * 0.92)]
-        border_mask = cv2.threshold(border_roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
-        row_strength = np.sum(border_mask > 0, axis=1)
-        row_threshold = max(int(width * 0.22), int(np.max(row_strength) * 0.48) if row_strength.size else 0)
-
-        line_rows = np.where(row_strength >= row_threshold)[0].tolist()
-        if line_rows:
-            grouped_rows = []
-            current_group = [line_rows[0]]
-            for row in line_rows[1:]:
-                if row - current_group[-1] <= 3:
-                    current_group.append(row)
-                else:
-                    grouped_rows.append(current_group)
-                    current_group = [row]
-            if current_group:
-                grouped_rows.append(current_group)
-
-            section_lines = [int(np.mean(group)) for group in grouped_rows]
-            section_lines = [line for line in section_lines if line > scan_y_min]
-
-            for idx, top_line in enumerate(section_lines):
-                if idx + 1 < len(section_lines):
-                    bottom_line = section_lines[idx + 1]
-                else:
-                    bottom_line = scan_y_max
-                band_top = max(0, top_line + 3)
-                band_bottom = min(height, bottom_line - 3)
-                if band_bottom - band_top > 40:
-                    line_section_bands.append((band_top, band_bottom))
-
-            # Merge adjacent thin bands (header/content splits) into one position-level scope.
-            if line_section_bands:
-                merged_bands = [line_section_bands[0]]
-                merge_gap = max(8, int(height * 0.008))
-                for band_top, band_bottom in line_section_bands[1:]:
-                    prev_top, prev_bottom = merged_bands[-1]
-                    if (band_top - prev_bottom) <= merge_gap:
-                        merged_bands[-1] = (prev_top, max(prev_bottom, band_bottom))
-                    else:
-                        merged_bands.append((band_top, band_bottom))
-                line_section_bands = merged_bands
-
-        def in_section_scope(y: int, bands: List[Tuple[int, int]], pad: int = 0) -> bool:
-            yi = int(y)
-            if not bands:
-                return scan_y_min <= yi <= scan_y_max
-            for top, bottom in bands:
-                if (int(top) - pad) <= yi <= (int(bottom) + pad):
-                    return True
-            return False
-
-        max_row = max((int(b.row) for b in bubble_candidates), default=0)
-        if line_section_bands:
-            section_start_min = int(line_section_bands[0][0])
-            section_start_max = int(line_section_bands[-1][1])
-        else:
-            section_start_min = int(height * 0.22)
-            section_start_max = int(height * 0.74)
-
-        section_span = max(1, section_start_max - section_start_min)
-        section_step = max(
-            int(height * 0.06),
-            int(section_span / max(1, max_row + 1))
+        # ---- detect printed bubble rings in the left lane ----
+        expected_slots = sum(
+            1 for c in candidates if not getattr(c, "is_placeholder", False)
         )
-        # Layout now keeps vote-limit text in the header row; first bubble starts slightly earlier.
-        first_candidate_offset = max(18, int(section_step * 0.14))
-        candidate_step = max(22, int(section_step * 0.23))
-        default_bubble_center_x = int(width * 0.025)
-        bubble_center_x = default_bubble_center_x
-        bubble_radius = max(10, int(min(width, height) * 0.0105))
-        x_snap_span = max(2, int(bubble_radius * 0.38))
+        ring_ys = self._detect_ring_ys(
+            gray, w, h, bubble_r, lane_cx, expected_slots
+        )
 
-        thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # ---- map candidates to pixel coords (proportional to candidate count) ----
+        slot_measurements = self._assign_slots(
+            candidates, ring_ys, h, w, bubble_r, lane_cx
+        )
 
-        ring_centers = []
-        left_bound = int(width * 0.24)
-        top_bound = scan_y_min
-        bottom_bound = scan_y_max
-        min_area = max(30, int(np.pi * (bubble_radius * 0.45) ** 2))
-        max_area = int(np.pi * (bubble_radius * 1.8) ** 2)
+        # ---- score each slot with the global threshold map ----
+        self.debug_bubbles = []
+        for slot in slot_measurements:
+            score = self._fill_score(
+                gray, slot["cx"], slot["cy"], bubble_r, global_thresh
+            )
+            slot["fill_score"] = float(score)
+            slot["threshold"]  = FILL_THRESHOLD
+            self.debug_bubbles.append(dict(slot))
 
-        for contour in contours:
-            x, y, bw, bh = cv2.boundingRect(contour)
-            if x > left_bound or y < top_bound or y > bottom_bound:
-                continue
-            if bw <= 0 or bh <= 0:
-                continue
+        return self._select_winners(slot_measurements)
 
-            area = cv2.contourArea(contour)
-            if area < min_area or area > max_area:
-                continue
+    def _estimate_lane_cx(
+        self, gray: np.ndarray, w: int, h: int, bubble_r: int
+    ) -> int:
+        """
+        Find the X centre of the bubble column.
 
-            aspect = bw / float(bh)
-            if not (0.60 <= aspect <= 1.40):
-                continue
+        HoughCircles only finds circular EDGES (rings). Filled/shaded bubbles
+        have no strong circular edge — they're solid dark blobs. So we use
+        column projection instead:
 
-            perimeter = cv2.arcLength(contour, True)
-            if perimeter <= 0:
-                continue
-            circularity = (4.0 * np.pi * area) / (perimeter * perimeter)
-            if circularity < 0.35:
-                continue
+        1. Threshold to dark pixels in the left lane strip
+        2. Sum dark pixels per column → find the column with the most ink
+        3. Smooth and find the peak X
 
-            moments = cv2.moments(contour)
-            if moments["m00"] == 0:
-                continue
-            cx = int(moments["m10"] / moments["m00"])
-            cy = int(moments["m01"] / moments["m00"])
-            if not in_section_scope(cy, line_section_bands, pad=max(8, int(bubble_radius * 0.9))):
-                continue
-            ring_centers.append((cx, cy))
+        Falls back to geometric default (3.5% of width) if nothing found.
+        """
+        default_cx = int(w * 0.07)
+        lane_right = int(w * 0.12)
 
-        # Hough fallback: detect printed bubble rings in the left bubble column.
-        roi_top = max(0, scan_y_min)
-        roi_bottom = min(height, scan_y_max)
-        roi_left = max(0, int(width * 0.00))
-        roi_right = min(width, int(width * 0.10))
-        roi = gray[roi_top:roi_bottom, roi_left:roi_right]
-        if roi.size > 0:
-            roi_blurred = cv2.medianBlur(roi, 5)
+        # Only look in the scannable vertical range to avoid header/footer noise
+        top    = int(h * (SCAN_TOP_FRAC + SCAN_TOP_PAD_FRAC))
+        bottom = int(h * SCAN_BOTTOM_FRAC)
+        if top >= bottom:
+            top = int(h * SCAN_TOP_FRAC)
+        strip  = gray[top:bottom, :lane_right]
+
+        # Threshold: pixels darker than 160 are "ink"
+        dark = (strip < 160).astype(np.float32)
+
+        # Column sum = how much dark ink is in each vertical column
+        col_sum = dark.sum(axis=0)
+        col_dark_ratio = col_sum / max(1.0, float(strip.shape[0]))
+        if col_sum.max() < 3:
+            return default_cx
+
+        # Smooth to suppress noise then find peak
+        col_smooth = np.convolve(
+            col_sum,
+            np.ones(max(3, bubble_r)) / max(3, bubble_r),
+            mode='same',
+        )
+
+        # Suppress columns that are likely just the page border (solid vertical lines)
+        border_band = max(5, int(w * 0.05))
+        for x in range(min(border_band, len(col_smooth))):
+            col_smooth[x] *= 0.1
+
+        for x in range(len(col_smooth)):
+            if col_dark_ratio[x] >= 0.70:
+                col_smooth[x] *= 0.25
+
+        peak_x = int(np.argmax(col_smooth))
+        peak_x = max(bubble_r, min(lane_right - bubble_r, peak_x))
+        return peak_x
+
+    def _detect_ring_ys(
+        self,
+        gray: np.ndarray,
+        w: int,
+        h: int,
+        bubble_r: int,
+        lane_cx: int,
+        expected_count: Optional[int] = None,
+    ) -> List[int]:
+        """
+        Find Y centres of all bubbles (empty OR filled) in the bubble column.
+
+        Instead of HoughCircles (which only finds rings/edges), we use
+        blob detection on the dark pixels in a narrow vertical strip
+        centred on lane_cx. This finds both empty bubble outlines AND
+        filled/shaded solid circles.
+
+        Returns sorted deduplicated list of Y centres.
+        """
+        top       = int(h * (SCAN_TOP_FRAC + SCAN_TOP_PAD_FRAC))
+        bottom    = int(h * SCAN_BOTTOM_FRAC)
+        if top >= bottom:
+            top = int(h * SCAN_TOP_FRAC)
+        half_lane = max(bubble_r + 4, int(w * 0.025))
+
+        x1 = max(0, lane_cx - half_lane)
+        x2 = min(w, lane_cx + half_lane)
+
+        strip = gray[top:bottom, x1:x2]
+
+        blur = cv2.GaussianBlur(strip, (3, 3), 0)
+
+        # Adaptive threshold — handles varying paper brightness
+        block = max(9, (bubble_r * 2) | 1)
+        thresh = cv2.adaptiveThreshold(
+            blur, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            block, 6,
+        )
+
+        # Morphological open + close to reduce text noise and merge bubble outlines
+        k = max(3, bubble_r // 2)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        opened = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
+        closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        # Find connected components — each bubble should be one blob
+        n_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+            closed, connectivity=8
+        )
+
+        min_area = int(np.pi * (bubble_r * 0.4) ** 2)
+        max_area = int(np.pi * (bubble_r * 2.5) ** 2)
+
+        raw_ys: List[int] = []
+        for i in range(1, n_labels):  # skip background label 0
+            area = int(stats[i, cv2.CC_STAT_AREA])
+            if not (min_area <= area <= max_area):
+                continue
+            bw = int(stats[i, cv2.CC_STAT_WIDTH])
+            bh = int(stats[i, cv2.CC_STAT_HEIGHT])
+            # Must be roughly round (not a horizontal line from borders)
+            if bh == 0 or not (0.3 <= bw / bh <= 3.0):
+                continue
+            cy_rel = float(centroids[i][1])
+            raw_ys.append(int(cy_rel) + top)
+
+        # Fallback: HoughCircles on the strip if blob detection is empty
+        if not raw_ys:
             circles = cv2.HoughCircles(
-                roi_blurred,
+                blur,
                 cv2.HOUGH_GRADIENT,
                 dp=1.2,
-                minDist=max(16, int(candidate_step * 0.55)),
-                param1=90,
-                param2=14,
-                minRadius=max(6, int(bubble_radius * 0.45)),
-                maxRadius=max(9, int(bubble_radius * 1.45)),
+                minDist=max(10, int(bubble_r * 1.6)),
+                param1=80,
+                param2=12,
+                minRadius=max(3, int(bubble_r * 0.6)),
+                maxRadius=max(5, int(bubble_r * 1.4)),
             )
             if circles is not None:
-                for circle in np.round(circles[0, :]).astype("int"):
-                    cx = int(circle[0] + roi_left)
-                    cy = int(circle[1] + roi_top)
-                    if not in_section_scope(cy, line_section_bands, pad=max(8, int(bubble_radius * 0.9))):
-                        continue
-                    ring_centers.append((cx, cy))
+                for circ in circles[0, :]:
+                    raw_ys.append(int(circ[1]) + top)
 
-        unique_rings = []
-        for cx, cy in sorted(ring_centers, key=lambda p: p[1]):
-            if all(np.hypot(cx - ux, cy - uy) > max(6, int(bubble_radius * 0.75)) for ux, uy in unique_rings):
-                unique_rings.append((cx, cy))
+        # Deduplicate: merge detections within 1.5 × bubble diameter
+        raw_ys.sort()
+        merged: List[int] = []
+        min_gap = int(bubble_r * 1.5)
+        for y in raw_ys:
+            if not merged or (y - merged[-1]) >= min_gap:
+                merged.append(y)
 
-        # Directly detect likely filled bubbles as dense dark circular blobs in the left lane.
-        filled_blob_centers = []
-        left_lane_roi = dark_mask[:, : int(width * 0.12)]
-        if left_lane_roi.size > 0:
-            blob_mask = cv2.morphologyEx(left_lane_roi, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
-            blob_contours, _ = cv2.findContours(blob_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            blob_min_area = max(45, int(np.pi * (bubble_radius * 0.70) ** 2))
-            blob_max_area = int(np.pi * (bubble_radius * 2.10) ** 2)
+        if expected_count and len(merged) > expected_count:
+            merged = self._select_consistent_rings(merged, expected_count)
 
-            for contour in blob_contours:
-                x, y, bw, bh = cv2.boundingRect(contour)
-                if bw <= 0 or bh <= 0:
-                    continue
+        return merged
 
-                area = cv2.contourArea(contour)
-                if area < blob_min_area or area > blob_max_area:
-                    continue
+    @staticmethod
+    def _select_consistent_rings(ring_ys: List[int], count: int) -> List[int]:
+        """
+        Keep the most consistently spaced run of rings, dropping header noise.
+        """
+        if count <= 0 or len(ring_ys) <= count:
+            return ring_ys
 
-                aspect = bw / float(bh)
-                if not (0.65 <= aspect <= 1.35):
-                    continue
+        gaps = np.diff(ring_ys)
+        median_gap = float(np.median(gaps)) if gaps.size else 0.0
+        if median_gap <= 0.0:
+            return ring_ys[:count]
 
-                density = area / float(max(1, bw * bh))
-                if density < 0.34:
-                    continue
-
-                perimeter = cv2.arcLength(contour, True)
-                if perimeter <= 0:
-                    continue
-                circularity = (4.0 * np.pi * area) / (perimeter * perimeter)
-                if circularity < 0.42:
-                    continue
-
-                moments = cv2.moments(contour)
-                if moments["m00"] == 0:
-                    continue
-
-                cx = int(moments["m10"] / moments["m00"])
-                cy = int(moments["m01"] / moments["m00"])
-                if not in_section_scope(cy, line_section_bands, pad=max(8, int(bubble_radius * 0.9))):
-                    continue
-                filled_blob_centers.append((cx, cy, float(area)))
-
-        # Calibrate bubble lane X conservatively; reject large shifts that likely target text/borders.
-        if unique_rings:
-            x_pool = [
-                int(cx)
-                for cx, cy in unique_rings
-                if in_section_scope(cy, line_section_bands, pad=max(8, int(bubble_radius * 0.9))) and cx <= int(width * 0.12)
-            ]
-            if len(x_pool) >= 6:
-                candidate_x = int(np.percentile(x_pool, 30))
-                max_shift = max(4, int(width * 0.006))
-                if abs(candidate_x - default_bubble_center_x) <= max_shift:
-                    bubble_center_x = candidate_x
-
-        bubble_center_x = int(np.clip(bubble_center_x, int(width * 0.015), int(width * 0.070)))
-
-        # Keep a fixed bubble lane X; dynamic X calibration can drift into text blocks.
-        ring_lane_tolerance = max(10, int(bubble_radius * 1.6))
-        ring_lane = [(cx, cy) for cx, cy in unique_rings if abs(cx - bubble_center_x) <= ring_lane_tolerance]
-        lane_rings = ring_lane if len(ring_lane) >= 6 else unique_rings
-
-        # Section bands are detected from table borders; used as per-section scan scopes.
-        section_bands = list(line_section_bands)
-
-        if not section_bands:
-            # Fallback: derive bands from detected ring positions if line detection fails.
-            if lane_rings:
-                sorted_lane_rings = sorted(lane_rings, key=lambda p: p[1])
-                lane_gaps = [sorted_lane_rings[i + 1][1] - sorted_lane_rings[i][1] for i in range(len(sorted_lane_rings) - 1)]
-                median_gap = float(np.median(lane_gaps)) if lane_gaps else float(candidate_step)
-                section_gap_threshold = max(int(median_gap * 1.8), int(bubble_radius * 2.8), int(candidate_step * 1.4))
-
-                current_group = [sorted_lane_rings[0]]
-                for idx in range(1, len(sorted_lane_rings)):
-                    previous_y = sorted_lane_rings[idx - 1][1]
-                    current_y = sorted_lane_rings[idx][1]
-                    if (current_y - previous_y) > section_gap_threshold:
-                        section_bands.append((current_group[0][1] - 20, current_group[-1][1] + 20))
-                        current_group = []
-                    current_group.append(sorted_lane_rings[idx])
-                if current_group:
-                    section_bands.append((current_group[0][1] - 20, current_group[-1][1] + 20))
-
-        if not section_bands:
-            section_bands = [(section_start_min, scan_y_max)]
-
-        # Match positions and sections in vertical order, but only compare circles within the same band.
-        ordered_positions = []
-        for row_index in sorted({int(b.row) for b in bubble_candidates}):
-            position_candidates = sorted(
-                [bubble for bubble in bubble_candidates if int(bubble.row) == row_index],
-                key=lambda b: (int(b.col), int(b.candidate_id)),
-            )
-            ordered_positions.append((row_index, position_candidates))
-
-        # Prefer ring-derived position bands when they better match expected row count.
-        expected_rows = len(ordered_positions)
-        ring_derived_bands = []
-        if lane_rings:
-            sorted_lane_rings = sorted(lane_rings, key=lambda p: p[1])
-            ring_gap_threshold = max(int(candidate_step * 1.55), int(bubble_radius * 2.8))
-            current_group = [sorted_lane_rings[0]]
-            for idx in range(1, len(sorted_lane_rings)):
-                prev_y = int(sorted_lane_rings[idx - 1][1])
-                curr_y = int(sorted_lane_rings[idx][1])
-                if (curr_y - prev_y) > ring_gap_threshold:
-                    y_values = [int(point[1]) for point in current_group]
-                    pad = max(10, int(candidate_step * 0.6))
-                    ring_derived_bands.append((max(0, min(y_values) - pad), min(height - 1, max(y_values) + pad)))
-                    current_group = []
-                current_group.append(sorted_lane_rings[idx])
-            if current_group:
-                y_values = [int(point[1]) for point in current_group]
-                pad = max(10, int(candidate_step * 0.6))
-                ring_derived_bands.append((max(0, min(y_values) - pad), min(height - 1, max(y_values) + pad)))
-
-        if ring_derived_bands:
-            if not section_bands:
-                section_bands = ring_derived_bands
+        best_i = 0
+        best_score = float("inf")
+        for i in range(0, len(ring_ys) - count + 1):
+            window = ring_ys[i:i + count]
+            window_gaps = np.diff(window)
+            if window_gaps.size == 0:
+                score = 0.0
             else:
-                current_delta = abs(len(section_bands) - expected_rows)
-                ring_delta = abs(len(ring_derived_bands) - expected_rows)
-                if ring_delta <= current_delta:
-                    section_bands = ring_derived_bands
+                score = float(np.mean(np.abs(window_gaps - median_gap)))
+            if score < best_score:
+                best_score = score
+                best_i = i
 
-        # Deterministic global mapping: assign detected bubble rings sequentially by known candidate counts.
-        # This avoids section-anchor drift when ballot separators are noisy.
-        global_row_ring_points = {}
-        sorted_lane_rings = sorted(lane_rings, key=lambda p: p[1])
-        total_slots = sum(len(position_candidates) for _, position_candidates in ordered_positions)
+        return ring_ys[best_i:best_i + count]
 
-        if total_slots > 0 and len(sorted_lane_rings) >= total_slots:
-            expected_all = []
-            row_counts = []
-            for row_index, position_candidates in ordered_positions:
-                count = len(position_candidates)
-                row_counts.append((row_index, count))
-                for idx in range(count):
-                    expected_all.append(int(section_start_min + (row_index * section_step) + first_candidate_offset + (idx * candidate_step)))
-
-            best_window = None
-            best_score = float("inf")
-            max_start = len(sorted_lane_rings) - total_slots
-
-            for start_idx in range(0, max_start + 1):
-                window = sorted_lane_rings[start_idx:start_idx + total_slots]
-                ys = np.array([int(point[1]) for point in window], dtype=float)
-
-                row_penalty = 0.0
-                boundary_penalty = 0.0
-                offset = 0
-                for _, count in row_counts:
-                    row_ys = ys[offset:offset + count]
-                    if count > 1:
-                        gaps = np.diff(row_ys)
-                        row_penalty += float(np.std(gaps))
-                        row_penalty += abs(float(np.median(gaps)) - float(candidate_step)) * 0.25
-                    offset += count
-
-                offset = 0
-                for idx, (_, count) in enumerate(row_counts[:-1]):
-                    last_y = ys[offset + count - 1]
-                    next_first_y = ys[offset + count]
-                    boundary_gap = float(next_first_y - last_y)
-                    boundary_penalty += max(0.0, (candidate_step * 1.10) - boundary_gap) * 0.90
-                    offset += count
-
-                diffs = ys - np.array(expected_all, dtype=float)
-                align_penalty = abs(float(np.median(diffs))) * 0.08 + float(np.std(diffs)) * 0.06
-
-                score = row_penalty + boundary_penalty + align_penalty
-                if score < best_score:
-                    best_score = score
-                    best_window = window
-
-            if best_window is not None:
-                best_ys = np.array([int(point[1]) for point in best_window], dtype=float)
-                expected_ys = np.array(expected_all, dtype=float)
-                abs_diffs = np.abs(best_ys - expected_ys)
-                median_abs_diff = float(np.median(abs_diffs))
-                max_abs_diff = float(np.max(abs_diffs))
-
-                boundary_min_gap = float("inf")
-                offset = 0
-                for _, count in row_counts[:-1]:
-                    last_current = best_ys[offset + count - 1]
-                    first_next = best_ys[offset + count]
-                    boundary_min_gap = min(boundary_min_gap, float(first_next - last_current))
-                    offset += count
-                if boundary_min_gap == float("inf"):
-                    boundary_min_gap = float(candidate_step)
-
-                use_global_mapping = (
-                    median_abs_diff <= max(12, int(candidate_step * 0.55))
-                    and max_abs_diff <= max(26, int(candidate_step * 1.10))
-                    and boundary_min_gap >= max(6, int(candidate_step * 0.55))
-                )
-
-                if use_global_mapping:
-                    offset = 0
-                    for row_index, count in row_counts:
-                        row_points = []
-                        for point in best_window[offset:offset + count]:
-                            row_points.append(
-                                (
-                                    int(np.clip(point[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span)),
-                                    int(point[1]),
-                                )
-                            )
-                        global_row_ring_points[row_index] = row_points
-                        offset += count
-
-        populated_bands = []
-        for band_top, band_bottom in section_bands:
-            band_rings = [ring for ring in lane_rings if band_top <= ring[1] <= band_bottom]
-            if band_rings:
-                populated_bands.append((band_top, band_bottom))
-
-        if populated_bands:
-            section_bands = populated_bands
-
-        # Assign each position to the nearest section band center while preserving top-to-bottom order.
-        sorted_bands = sorted(section_bands, key=lambda b: ((b[0] + b[1]) / 2.0))
-        section_pairs = []
-        next_band_start = 0
-
-        for row_index, position_candidates in ordered_positions:
-            candidate_count = max(1, len(position_candidates))
-            geometric_mid = (
-                section_start_min
-                + (row_index * section_step)
-                + first_candidate_offset
-                + ((candidate_count - 1) * candidate_step / 2.0)
-            )
-
-            selected_band = None
-            selected_band_idx = None
-
-            if next_band_start < len(sorted_bands):
-                search_slice = list(enumerate(sorted_bands[next_band_start:], start=next_band_start))
-                selected_band_idx, selected_band = min(
-                    search_slice,
-                    key=lambda item: abs(((item[1][0] + item[1][1]) / 2.0) - geometric_mid),
-                )
-                next_band_start = selected_band_idx + 1
-
-            if selected_band is None:
-                # Fallback geometric band for missing detections.
-                fallback_top = int(section_start_min + (row_index * section_step) - max(10, int(candidate_step * 0.8)))
-                fallback_bottom = int(
-                    section_start_min
-                    + (row_index * section_step)
-                    + first_candidate_offset
-                    + max(1, candidate_count - 1) * candidate_step
-                    + max(12, int(candidate_step * 1.2))
-                )
-                selected_band = (max(0, fallback_top), min(height - 1, fallback_bottom))
-
-            section_pairs.append(((row_index, position_candidates), selected_band))
-
-        def region_fill_ratio(center_x: int, center_y: int) -> float:
-            x1 = int(max(0, center_x - bubble_radius - 2))
-            x2 = int(min(width, center_x + bubble_radius + 2))
-            y1 = int(max(0, center_y - bubble_radius - 2))
-            y2 = int(min(height, center_y + bubble_radius + 2))
-
-            dark_roi = score_dark_mask[y1:y2, x1:x2]
-            gray_roi = gray[y1:y2, x1:x2]
-            if dark_roi.size == 0 or gray_roi.size == 0:
-                return 0.0
-
-            roi_h, roi_w = dark_roi.shape[:2]
-            yy, xx = np.ogrid[:roi_h, :roi_w]
-            cx = center_x - x1
-            cy = center_y - y1
-
-            inner_radius = max(4, int(bubble_radius * 0.52))
-            center_radius = max(2, int(bubble_radius * 0.26))
-            outer_radius = max(inner_radius + 2, int(bubble_radius * 0.92))
-            surround_radius = max(outer_radius + 3, int(bubble_radius * 1.55))
-            dist2 = (xx - cx) ** 2 + (yy - cy) ** 2
-            center_mask = dist2 <= (center_radius ** 2)
-            inner_mask = dist2 <= (inner_radius ** 2)
-            ring_mask = (dist2 > (inner_radius ** 2)) & (dist2 <= (outer_radius ** 2))
-            surround_mask = (dist2 > (outer_radius ** 2)) & (dist2 <= (surround_radius ** 2))
-
-            if np.count_nonzero(inner_mask) == 0:
-                return 0.0
-
-            dark_ratio_inner = float(np.mean(dark_roi[inner_mask] > 0))
-            dark_ratio_ring = float(np.mean(dark_roi[ring_mask] > 0)) if np.count_nonzero(ring_mask) else 0.0
-            ink_inner = float(np.mean((255.0 - gray_roi[inner_mask]) / 255.0))
-            ink_ring = float(np.mean((255.0 - gray_roi[ring_mask]) / 255.0)) if np.count_nonzero(ring_mask) else 0.0
-            ink_center = float(np.mean((255.0 - gray_roi[center_mask]) / 255.0)) if np.count_nonzero(center_mask) else 0.0
-            dark_ratio_center = float(np.mean(dark_roi[center_mask] > 0)) if np.count_nonzero(center_mask) else 0.0
-            center_black = float(np.mean(gray_roi[center_mask] < 118)) if np.count_nonzero(center_mask) else 0.0
-            inner_black = float(np.mean(gray_roi[inner_mask] < 118))
-            ring_black = float(np.mean(gray_roi[ring_mask] < 118)) if np.count_nonzero(ring_mask) else 0.0
-            surround_ink = float(np.mean((255.0 - gray_roi[surround_mask]) / 255.0)) if np.count_nonzero(surround_mask) else ink_ring
-            surround_dark = float(np.mean(dark_roi[surround_mask] > 0)) if np.count_nonzero(surround_mask) else dark_ratio_ring
-            surround_black = float(np.mean(gray_roi[surround_mask] < 118)) if np.count_nonzero(surround_mask) else ring_black
-
-            # Hard reject likely ring-edge hits when center remains too weak.
-            ring_over_center = ink_ring - ink_center
-            ring_over_inner = ink_ring - ink_inner
-            if (
-                ring_over_center > 0.06
-                and ring_over_inner > 0.04
-                and center_black < 0.42
-                and dark_ratio_center < 0.40
-            ):
-                return 0.0
-
-            band = max(1, int(bubble_radius * 0.14))
-            h_line_mask = (np.abs(yy - cy) <= band) & (dist2 > (outer_radius ** 2))
-            v_line_mask = (np.abs(xx - cx) <= band) & (dist2 > (outer_radius ** 2))
-            h_line_dark = float(np.mean(dark_roi[h_line_mask] > 0)) if np.count_nonzero(h_line_mask) else 0.0
-            v_line_dark = float(np.mean(dark_roi[v_line_mask] > 0)) if np.count_nonzero(v_line_mask) else 0.0
-
-            # Local contrast is the strongest signal for true shading under uneven lighting.
-            center_contrast = max(0.0, ink_center - (surround_ink + 0.03))
-            inner_contrast = max(0.0, ink_inner - (surround_ink + 0.02))
-            black_contrast = max(0.0, center_black - (surround_black + 0.05))
-            dark_contrast = max(0.0, dark_ratio_center - (surround_dark + 0.06))
-            center_anchor_bonus = max(0.0, center_black - 0.30)
-
-            # Reject unfilled ring outlines where ring darkness dominates inner core.
-            ring_bias_penalty = max(0.0, (ink_ring - ink_center) * 0.85)
-            ring_black_penalty = max(0.0, (ring_black - center_black) * 0.60)
-            line_penalty = (0.20 * h_line_dark) + (0.12 * v_line_dark)
-
-            score = (
-                (0.42 * center_contrast)
-                + (0.24 * inner_contrast)
-                + (0.20 * black_contrast)
-                + (0.14 * dark_contrast)
-                + (0.10 * center_anchor_bonus)
-                - ring_bias_penalty
-                - ring_black_penalty
-                - line_penalty
-            )
-            return float(max(0.0, min(1.0, score * 2.35)))
-
-        bubble_measurements = []
-        prev_anchor_end = -10**9
-        for (row_index, position_candidates), section_band in section_pairs:
-            section_top, section_bottom = section_band
-            section_rings = sorted(
-                [ring for ring in lane_rings if section_top <= ring[1] <= section_bottom],
-                key=lambda p: p[1],
-            )
-            section_center_x = bubble_center_x
-
-            # Start from global row geometry, but prefer detected section top as local anchor when credible.
-            geometric_section_start = int(section_start_min + (row_index * section_step))
-            candidate_count = max(1, len(position_candidates))
-            geometric_mid_global = int(
-                geometric_section_start
-                + first_candidate_offset
-                + ((max(1, candidate_count) - 1) * candidate_step / 2.0)
-            )
-
-            # If detected section is too short for this position, use a geometry-sized fallback band.
-            min_required_height = int(first_candidate_offset + max(1, candidate_count - 1) * candidate_step + (bubble_radius * 2))
-            if (section_bottom - section_top) < min_required_height:
-                section_top = int(geometric_section_start - max(10, int(candidate_step * 0.8)))
-                section_bottom = int(
-                    geometric_section_start
-                    + first_candidate_offset
-                    + max(1, candidate_count - 1) * candidate_step
-                    + max(12, int(candidate_step * 1.2))
-                )
-                section_top = max(0, section_top)
-                section_bottom = min(height - 1, section_bottom)
-
-                # Re-scope rings to the fallback band.
-                section_rings = sorted(
-                    [ring for ring in lane_rings if section_top <= ring[1] <= section_bottom],
-                    key=lambda p: p[1],
-                )
-
-            band_center = int((section_top + section_bottom) / 2)
-            band_is_consistent = abs(band_center - geometric_mid_global) <= max(int(section_step * 0.75), int(candidate_step * 3.0))
-
-            row_span = int(first_candidate_offset + max(1, candidate_count - 1) * candidate_step)
-            if band_is_consistent:
-                row_anchor_start = int(section_top)
-            else:
-                row_anchor_start = int((0.65 * geometric_section_start) + (0.35 * section_top))
-
-            # Anchor row start to observed rings to absorb header-layout changes.
-            if section_rings:
-                inferred_start = int(min(int(point[1]) for point in section_rings) - first_candidate_offset)
-                blend = 0.65 if candidate_count >= 2 else 0.45
-                row_anchor_start = int(((1.0 - blend) * row_anchor_start) + (blend * inferred_start))
-
-            # Keep rows strictly top-to-bottom so neighboring positions cannot share Y slots.
-            min_start_from_prev = int(prev_anchor_end + max(12, int(candidate_step * 0.90)))
-            if row_anchor_start < min_start_from_prev:
-                row_anchor_start = min_start_from_prev
-
-            max_start_in_band = int(section_bottom - row_span - max(8, bubble_radius))
-            if max_start_in_band > 0:
-                row_anchor_start = min(row_anchor_start, max_start_in_band)
-
-            row_anchor_start = max(0, row_anchor_start)
-            prev_anchor_end = int(row_anchor_start + row_span)
-
-            geometric_mid = int(
-                row_anchor_start
-                + first_candidate_offset
-                + ((max(1, candidate_count) - 1) * candidate_step / 2.0)
-            )
-
-            usable_top = int(section_top + max(8, bubble_radius))
-            usable_bottom = int(section_bottom - max(8, bubble_radius))
-
-            # Guarantee enough vertical room so different candidate slots don't collapse into one Y.
-            if usable_bottom - usable_top < max(18, int(candidate_step * 0.8)):
-                usable_top = int(max(0, row_anchor_start + first_candidate_offset - max(10, candidate_step // 2)))
-                usable_bottom = int(min(height - 1, usable_top + max(24, int((candidate_count + 1) * candidate_step))))
-
-            use_band_constraints = band_is_consistent
-
-            assigned_ring_points = None
-            global_points = global_row_ring_points.get(row_index)
-            if global_points is not None and len(global_points) == candidate_count:
-                assigned_ring_points = global_points
-
-            # Use ordered in-section ring windows for multi-candidate rows to prevent slot shifts.
-            window_rings = section_rings
-            use_window_matching = len(window_rings) >= candidate_count and candidate_count >= 2
-            if assigned_ring_points is None and use_window_matching:
-                best_window = None
-                best_score = float("inf")
-                geometric_ys = [
-                    int(row_anchor_start + first_candidate_offset + (i * candidate_step))
-                    for i in range(candidate_count)
-                ]
-
-                for start_idx in range(0, len(window_rings) - candidate_count + 1):
-                    window = window_rings[start_idx:start_idx + candidate_count]
-                    ys = [int(point[1]) for point in window]
-
-                    if candidate_count > 1:
-                        gaps = [ys[i + 1] - ys[i] for i in range(candidate_count - 1)]
-                        gap_std = float(np.std(gaps))
-                        median_gap = float(np.median(gaps))
-                        gap_penalty = gap_std + (abs(median_gap - candidate_step) * 0.35)
-                    else:
-                        gap_penalty = 0.0
-
-                    window_center = (ys[0] + ys[-1]) / 2.0
-                    center_penalty = abs(window_center - geometric_mid) * 0.05
-                    # Penalize windows that are globally shifted away from this row's expected slots.
-                    diffs = [ys[i] - geometric_ys[i] for i in range(candidate_count)]
-                    median_shift = float(np.median(diffs))
-                    shift_spread = float(np.std(diffs)) if candidate_count > 1 else 0.0
-                    shift_penalty = abs(median_shift) * 0.18 + shift_spread * 0.12
-                    score = gap_penalty + center_penalty + shift_penalty
-
-                    if score < best_score:
-                        best_score = score
-                        best_window = window
-
-                if best_window is not None:
-                    best_ys = [int(point[1]) for point in best_window]
-                    best_diffs = [best_ys[i] - geometric_ys[i] for i in range(candidate_count)]
-                    median_shift = float(np.median(best_diffs))
-                    shift_spread = float(np.std(best_diffs)) if candidate_count > 1 else 0.0
-                    max_allowed_shift = max(16, int(candidate_step * 0.95))
-                    max_allowed_spread = max(10, int(candidate_step * 0.55))
-                    window_center = (best_ys[0] + best_ys[-1]) / 2.0
-                    center_ok = abs(window_center - geometric_mid) <= max(int(section_step * 0.95), int(candidate_step * 1.9))
-
-                    gaps = [best_ys[i + 1] - best_ys[i] for i in range(candidate_count - 1)] if candidate_count > 1 else []
-                    gap_quality_ok = True
-                    if gaps:
-                        gap_quality_ok = (
-                            float(np.std(gaps)) <= max_allowed_spread
-                            and abs(float(np.median(gaps)) - float(candidate_step)) <= max(10, int(candidate_step * 0.65))
-                        )
-
-                    relaxed_shift_ok = abs(median_shift) <= max(34, int(candidate_step * 2.0))
-
-                    # Reject windows that point to another section; fall back to geometry in that case.
-                    strict_ok = center_ok and abs(median_shift) <= max_allowed_shift and shift_spread <= max_allowed_spread
-                    if strict_ok or (gap_quality_ok and relaxed_shift_ok):
-                        assigned_ring_points = [
-                            (
-                                int(np.clip(point[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span)),
-                                int(point[1]),
-                            )
-                            for point in best_window
-                        ]
-
-            # For single-candidate rows, anchor directly to the nearest in-section ring.
-            if assigned_ring_points is None and candidate_count == 1 and section_rings:
-                nearest_single = min(section_rings, key=lambda r: abs(int(r[1]) - geometric_mid))
-                single_tolerance = max(24, int(candidate_step * 1.4))
-                if abs(int(nearest_single[1]) - geometric_mid) <= single_tolerance or len(section_rings) == 1:
-                    assigned_ring_points = [
-                        (
-                            int(np.clip(nearest_single[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span)),
-                            int(nearest_single[1]),
-                        )
-                    ]
-
-            prev_ring_y = None
-            min_slot_gap = max(10, int(candidate_step * 0.50))
-            for idx, bubble in enumerate(position_candidates):
-                ring_x = section_center_x
-                # ORIGINAL geometry formula is CORRECT for vertical stacking:
-                # Each col represents a separate line at different Y
-                geometric_y = int(row_anchor_start + first_candidate_offset + (idx * candidate_step))
-                ring_y = int(geometric_y)
-                calibration_mode = "geometry"
-
-                # KEY FIX: For multi-candidate positions, skip pre-assigned ring points
-                # (they may be ordered incorrectly) and snap directly to detected rings
-                if candidate_count >= 2:
-                    # Multi-candidate (vertical stacking): snap to NEAREST detected ring
-                    if section_rings:
-                        nearest_ring = min(section_rings, key=lambda r: abs(r[1] - geometric_y))
-                        snap_tolerance = max(12, int(candidate_step * 0.70))  # Generous tolerance
-                        if abs(nearest_ring[1] - geometric_y) <= snap_tolerance:
-                            ring_x = int(np.clip(nearest_ring[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span))
-                            ring_y = int(nearest_ring[1])
-                            calibration_mode = "detected_ring_snap"
-                    # If no nearby ring or outside tolerance, use geometric Y (no override)
-                else:
-                    # Single candidate: allow assigned_ring_points (original behavior)
-                    if assigned_ring_points is not None and idx < len(assigned_ring_points):
-                        ring_x = int(assigned_ring_points[idx][0])
-                        ring_y = int(assigned_ring_points[idx][1])
-                        calibration_mode = "section_rings_window"
-                    else:
-                        if use_band_constraints:
-                            pad = max(6, int(candidate_step * 0.25))
-                            if ring_y < (usable_top - pad):
-                                ring_y = int(usable_top)
-                            elif ring_y > (usable_bottom + pad):
-                                ring_y = int(usable_bottom)
-
-                        if section_rings:
-                            nearest_ring = min(section_rings, key=lambda r: abs(r[1] - ring_y))
-                            snap_tolerance = max(8, int(candidate_step * (0.45 if candidate_count >= 3 else 0.55)))
-                            if abs(nearest_ring[1] - ring_y) <= snap_tolerance:
-                                ring_x = int(np.clip(nearest_ring[0], bubble_center_x - x_snap_span, bubble_center_x + x_snap_span))
-                                ring_y = int(nearest_ring[1])
-                                calibration_mode = "section_cluster"
-                            elif use_band_constraints:
-                                calibration_mode = "section_constrained"
-
-                # Stabilize slot ordering within each position to reduce jitter/swaps.
-                if prev_ring_y is not None and ring_y < (prev_ring_y + min_slot_gap):
-                    stabilized = prev_ring_y + min_slot_gap
-                    ring_y = int(min(stabilized, usable_bottom))
-                    calibration_mode = f"{calibration_mode}+stabilized"
-                prev_ring_y = int(ring_y)
-
-                calibrated_y = int(ring_y)
-                expected_y = int(geometric_y)
-                best_fill = 0.0
-                best_dx, best_dy = 0, 0
-                lane_left = int(bubble_center_x - max(6, int(bubble_radius * 1.05)))
-                lane_right = int(bubble_center_x + max(8, int(bubble_radius * 1.35)))
-
-                # Keep probing near the bubble lane. Wider offsets can drift into candidate text.
-                if candidate_count >= 2:
-                    probe_x_offsets = [-6, -4, -2, 0, 2, 4, 6]
-                    small_penalty = 0.016
-                else:
-                    probe_x_offsets = [-4, -2, 0, 2, 4]
-                    small_penalty = 0.022
-                attempted_probe = False
-                
-                for dx in probe_x_offsets:
-                    probe_x = int(ring_x + dx)
-                    if probe_x < lane_left or probe_x > lane_right:
-                        continue
-                    for dy in (-3, -1, 0, 1, 3):
-                        attempted_probe = True
-                        raw_score = region_fill_ratio(probe_x, int(calibrated_y + dy))
-                        # Prefer interior-aligned probes; this suppresses ring-edge lock-in.
-                        score = (
-                            raw_score
-                            - (abs(dx) * small_penalty)
-                            - (abs(dy) * 0.007)
-                            - (abs(probe_x - bubble_center_x) * 0.010)
-                        )
-                        if score > best_fill:
-                            best_fill = score
-                            best_dx, best_dy = dx, dy
-
-                if not attempted_probe:
-                    # Ring-snap X can occasionally drift; fall back to geometric lane center.
-                    fallback_x = int(np.clip(bubble_center_x, 0, width - 1))
-                    for dy in (-3, -1, 0, 1, 3):
-                        raw_score = region_fill_ratio(fallback_x, int(calibrated_y + dy))
-                        score = raw_score - (abs(dy) * 0.007)
-                        if score > best_fill:
-                            best_fill = score
-                            best_dx, best_dy = int(fallback_x - ring_x), dy
-
-                measurement = {
-                    "position_id": int(bubble.position_id),
-                    "candidate_id": int(bubble.candidate_id),
-                    "candidate_name": str(bubble.candidate_name) if bubble.candidate_name else None,
-                    "candidate_party": str(bubble.candidate_party) if getattr(bubble, "candidate_party", None) else None,
-                    "position_name": str(bubble.position_name) if getattr(bubble, "position_name", None) else None,
-                    "position_vote_limit": max(1, int(getattr(bubble, "position_vote_limit", 1) or 1)),
-                    "row": int(bubble.row),
-                    "col": int(bubble.col),
-                    "expected_x": int(ring_x),
-                    "expected_y": int(expected_y),
-                    "calibrated_y": int(calibrated_y),
-                    "calibration_mode": calibration_mode,
-                    "best_x": int(ring_x + best_dx),
-                    "best_y": int(calibrated_y + best_dy),
-                    "fill_score": float(best_fill),
-                    "threshold": float(self.detection_threshold),
-                    "detected": bool(best_fill >= self.detection_threshold),
-                    "detection_mode": "threshold" if best_fill >= self.detection_threshold else "none",
-                }
-                bubble_measurements.append(measurement)
-
-        votes_by_position = {}
-        position_vote_limits = {}
-        for measurement in bubble_measurements:
-            position_id = measurement["position_id"]
-            votes_by_position.setdefault(position_id, []).append(measurement)
-            position_vote_limits[position_id] = max(
-                int(position_vote_limits.get(position_id, 1)),
-                int(measurement.get("position_vote_limit", 1) or 1),
-            )
-
-        # Blob detections remain available for debugging, but do not force candidate scores.
-
-        all_page_scores = np.array([float(m["fill_score"]) for m in bubble_measurements], dtype=float) if bubble_measurements else np.array([], dtype=float)
-        if all_page_scores.size > 0:
-            global_med = float(np.median(all_page_scores))
-            global_p90 = float(np.percentile(all_page_scores, 90))
-            global_p95 = float(np.percentile(all_page_scores, 95))
-            global_max = float(np.max(all_page_scores))
-            global_std = float(np.std(all_page_scores))
-            global_blank_like = (
-                global_std < 0.055
-                and (global_p95 - global_med) < 0.16
-                and global_max < 0.86
-            )
-        else:
-            global_med = 0.0
-            global_p90 = 0.0
-            global_p95 = 0.0
-            global_max = 0.0
-            global_blank_like = True
-
-        adaptive_floor_multi = max(0.42, self.detection_threshold)
-        adaptive_floor_single = max(0.34, self.detection_threshold - 0.04)
-
-        def sigmoid(value: float) -> float:
-            return float(1.0 / (1.0 + np.exp(-value)))
-
-        for position_id, position_votes in votes_by_position.items():
-            ranked = sorted(position_votes, key=lambda item: item["fill_score"], reverse=True)
-            if not ranked:
-                continue
-
-            allowed_votes = max(1, int(position_vote_limits.get(position_id, 1)))
-
-            raw_scores = np.array([float(item["fill_score"]) for item in ranked], dtype=float)
-            score_max = float(np.max(raw_scores))
-            score_min = float(np.min(raw_scores))
-            score_med = float(np.median(raw_scores))
-            score_mean = float(np.mean(raw_scores))
-            score_std = float(np.std(raw_scores))
-            mad = float(np.median(np.abs(raw_scores - score_med)))
-            robust_sigma = max(0.03, 1.4826 * mad)
-            span = max(0.05, score_max - score_min)
-
-            for item in ranked:
-                raw = float(item["fill_score"])
-                rel = (raw - score_min) / span
-                z = (raw - score_med) / robust_sigma
-                norm = (0.68 * rel) + (0.32 * sigmoid((z - 0.90) * 1.35))
-                item["normalized_score"] = float(max(0.0, min(1.0, norm)))
-                item["detected"] = False
-                item["detection_mode"] = "none"
-
-            ranked_norm = sorted(ranked, key=lambda item: item.get("normalized_score", 0.0), reverse=True)
-            top = ranked_norm[0]
-            second = ranked_norm[1] if len(ranked_norm) > 1 else None
-            top_raw = float(top["fill_score"])
-            top_norm = float(top.get("normalized_score", 0.0))
-            second_raw = float(second["fill_score"]) if second else 0.0
-            second_norm = float(second.get("normalized_score", 0.0)) if second else 0.0
-            norm_gap = top_norm - second_norm
-            raw_gap = top_raw - second_raw
-            is_small_position = len(ranked_norm) <= 3
-
-            if is_small_position:
-                raw_floor = max(adaptive_floor_multi, 0.66)
-                min_raw_gap = 0.07
-                min_norm_gap = 0.07
-            else:
-                raw_floor = max(adaptive_floor_multi, 0.60)
-                min_raw_gap = 0.06
-                min_norm_gap = 0.06
-
-            if len(ranked_norm) == 1:
-                # Avoid impossible floor for single-candidate rows (score_med == top_raw).
-                evidence_floor = max(raw_floor - 0.04, global_med + 0.12, 0.58)
-            else:
-                evidence_floor = max(
-                    raw_floor,
-                    score_med + (0.08 if is_small_position else 0.06),
-                    score_mean + (0.45 * score_std) + 0.03,
-                )
-            if global_blank_like:
-                evidence_floor = max(evidence_floor, global_med + 0.20, global_p95 + 0.03, 0.68)
-            has_strong_evidence = top_raw >= evidence_floor
-
-            if len(ranked_norm) == 1:
-                # Single-candidate positions need stricter evidence to avoid blank-ballot false positives.
-                single_candidate_floor = max(0.58, adaptive_floor_single + 0.14, evidence_floor)
-                if global_blank_like:
-                    single_candidate_floor = max(single_candidate_floor, 0.66)
-                if float(top["fill_score"]) >= single_candidate_floor:
-                    top["detected"] = True
-                    top["detection_mode"] = "single_candidate_strict"
-                continue
-
-            if allowed_votes > 1:
-                multi_raw_floor = max(
-                    raw_floor,
-                    score_med + (0.03 if is_small_position else 0.02),
-                    score_mean + (0.25 * score_std),
-                    global_med + 0.10,
-                )
-                if global_blank_like:
-                    multi_raw_floor = max(multi_raw_floor, global_med + 0.16, global_p95 + 0.01, 0.64)
-
-                selected_count = 0
-                for candidate in ranked_norm:
-                    candidate_raw = float(candidate["fill_score"])
-                    candidate_norm = float(candidate.get("normalized_score", 0.0))
-                    if candidate_raw >= multi_raw_floor and candidate_norm >= 0.36:
-                        candidate["detected"] = True
-                        candidate["detection_mode"] = "multi_select_rank"
-                        selected_count += 1
-                        if selected_count >= allowed_votes:
-                            break
-
-                if selected_count == 0 and top_raw >= max(multi_raw_floor + 0.03, 0.70):
-                    top["detected"] = True
-                    top["detection_mode"] = "multi_select_top"
-
-                continue
-
-            # Primary ballot-specific rule: winner must have clear within-position margin.
-            if has_strong_evidence and top_norm >= 0.56 and norm_gap >= min_norm_gap and raw_gap >= min_raw_gap:
-                top["detected"] = True
-                top["detection_mode"] = "normalized_margin"
-            elif has_strong_evidence and top_raw >= max(raw_floor + 0.05, 0.74) and raw_gap >= (min_raw_gap * 0.8):
-                top["detected"] = True
-                top["detection_mode"] = "adaptive_top"
-
-        if global_blank_like:
-            strongest_mark = max((float(m["fill_score"]) for m in bubble_measurements), default=0.0)
-            strong_evidence_floor = max(0.72, global_p95 + 0.05, global_p90 + 0.07)
-            if strongest_mark < strong_evidence_floor:
-                for measurement in bubble_measurements:
-                    if measurement.get("detected"):
-                        if (
-                            measurement.get("detection_mode") == "single_candidate_strict"
-                            and float(measurement.get("fill_score", 0.0)) >= max(0.64, global_med + 0.18)
-                        ):
-                            continue
-                        measurement["detected"] = False
-                        measurement["detection_mode"] = "global_blank_guard"
-
-        for measurement in bubble_measurements:
-            self.debug_bubbles.append({
-                "position_id": measurement["position_id"],
-                "candidate_id": measurement["candidate_id"],
-                "candidate_name": measurement["candidate_name"],
-                "position_vote_limit": measurement.get("position_vote_limit", 1),
-                "row": measurement["row"],
-                "col": measurement["col"],
-                "expected_x": measurement["expected_x"],
-                "expected_y": measurement["expected_y"],
-                "calibrated_y": measurement["calibrated_y"],
-                "calibration_mode": measurement["calibration_mode"],
-                "best_x": measurement["best_x"],
-                "best_y": measurement["best_y"],
-                "fill_score": measurement["fill_score"],
-                "normalized_score": measurement.get("normalized_score"),
-                "threshold": measurement["threshold"],
-                "detected": measurement["detected"],
-                "detection_mode": measurement["detection_mode"],
-            })
-
-            if measurement["detected"]:
-                detected_votes.append(
-                    DetectedVote(
-                        position_id=measurement["position_id"],
-                        candidate_id=measurement["candidate_id"],
-                        candidate_name=measurement["candidate_name"],
-                        candidate_party=measurement.get("candidate_party"),
-                        position_name=measurement.get("position_name"),
-                        confidence=min(float(measurement.get("normalized_score", measurement["fill_score"])), 1.0),
-                        row=measurement["row"],
-                        col=measurement["col"],
-                    )
-                )
-
-        scan_scopes = []
-        scope_left = 0
-        scope_right = min(width - 1, int(width * 0.14))
-        for band_top, band_bottom in section_bands:
-            section_top = max(0, int(band_top) - 2)
-            section_bottom = min(height - 1, int(band_bottom) + 2)
-            if section_bottom > section_top:
-                scan_scopes.append((scope_left, section_top, scope_right, section_bottom))
-        if not scan_scopes:
-            scan_scopes.append((scope_left, max(0, scan_y_min), scope_right, min(height - 1, scan_y_max)))
-
-        self.debug_visualization_image = self._build_debug_visualization(
-            image=image_to_scan,
-            unique_rings=unique_rings,
-            filled_blob_centers=filled_blob_centers,
-            bubble_measurements=bubble_measurements,
-            section_bands=section_bands,
-            scan_scopes=scan_scopes,
-        )
-        
-        return detected_votes
-
-    def _build_debug_visualization(
+    def _assign_slots(
         self,
-        image: np.ndarray,
-        unique_rings: List[Tuple[int, int]],
-        filled_blob_centers: List[Tuple[int, int, float]],
-        bubble_measurements: List[Dict],
-        section_bands: List[Tuple[int, int]],
-        scan_scopes: List[Tuple[int, int, int, int]],
+        candidates: List[BubbleCandidate],
+        ring_ys: List[int],
+        h: int,
+        w: int,
+        bubble_r: int,
+        lane_cx: int,
+    ) -> List[Dict]:
+        """
+        Map each candidate to a concrete (cx, cy) pixel coordinate.
+
+        GEOMETRY IS THE PRIMARY SOURCE — ring detection only fine-tunes.
+
+        The ballot layout is deterministic: each position block has a header
+        row plus one row per candidate. We compute exact Y positions from
+        the proportional layout, then snap ±tight_tolerance to a detected
+        ring only if one is very close. This means different shading patterns
+        on different ballots never shift the ring assignments.
+
+        Snapping tolerance = 25% of per-candidate row height (very tight).
+        If no ring is within tolerance, the geometric Y is used as-is.
+        """
+        top    = int(h * (SCAN_TOP_FRAC + SCAN_TOP_PAD_FRAC))
+        bottom = int(h * SCAN_BOTTOM_FRAC)
+        if top >= bottom:
+            top = int(h * SCAN_TOP_FRAC)
+            bottom = int(h * SCAN_BOTTOM_FRAC)
+        scan_height = bottom - top
+
+        # Group by position row
+        rows: Dict[int, List[BubbleCandidate]] = {}
+        for c in candidates:
+            rows.setdefault(c.row, []).append(c)
+        sorted_rows = sorted(rows.keys())
+        if not sorted_rows:
+            return []
+
+        # Count real (non-placeholder) candidates per position
+        HEADER_UNITS = 1.0  # treat header as almost a full candidate for spacing purposes
+        row_real_counts: Dict[int, int] = {}
+        total_units = 0.0
+        for row_idx in sorted_rows:
+            real = [c for c in rows[row_idx] if not getattr(c, "is_placeholder", False)]
+            row_real_counts[row_idx] = max(1, len(real))
+            total_units += row_real_counts[row_idx] + HEADER_UNITS
+
+        slots: List[Dict] = []
+        cursor = float(top)
+
+        for row_idx in sorted_rows:
+            row_candidates = sorted(
+                [c for c in rows[row_idx] if not getattr(c, "is_placeholder", False)],
+                key=lambda c: c.col,
+            )
+            n_cands = row_real_counts[row_idx]
+
+            # Proportional height for this position
+            pos_units  = n_cands + HEADER_UNITS
+            pos_height = scan_height * (pos_units / total_units)
+            header_h   = pos_height * (HEADER_UNITS / pos_units)
+            content_top = cursor + header_h
+            content_h   = pos_height - header_h
+
+            # Per-candidate step height — used for snap tolerance
+            step_h = content_h / n_cands
+
+            # Tight snap tolerance: only snap if ring is within 25% of step_h
+            # This prevents rings from voted bubbles in adjacent rows from
+            # stealing the assignment
+            snap_tol = int(step_h * 0.25)
+
+            for i, cand in enumerate(row_candidates):
+                # GEOMETRIC Y — primary source, always computed
+                geom_y = int(content_top + step_h * (i + 0.45))
+                geom_y = int(np.clip(geom_y, bubble_r, h - bubble_r))
+
+                # Fine-tune: find the nearest ring within tight tolerance
+                best_ring_y = None
+                best_dist   = snap_tol + 1
+                for ry in ring_ys:
+                    d = abs(ry - geom_y)
+                    if d < best_dist:
+                        best_dist   = d
+                        best_ring_y = ry
+
+                # Only snap if ring is genuinely close — otherwise trust geometry
+                final_y = best_ring_y if best_ring_y is not None else geom_y
+                final_y = int(np.clip(final_y, bubble_r, h - bubble_r))
+
+                slots.append({
+                    "position_id":         int(cand.position_id),
+                    "candidate_id":        int(cand.candidate_id),
+                    "candidate_name":      cand.candidate_name,
+                    "candidate_party":     getattr(cand, "candidate_party", None),
+                    "position_name":       getattr(cand, "position_name", None),
+                    "position_vote_limit": max(1, int(getattr(cand, "position_vote_limit", 1) or 1)),
+                    "row":     int(cand.row),
+                    "col":     int(cand.col),
+                    "cx":      lane_cx,
+                    "cy":      final_y,
+                    "geom_y":  geom_y,
+                    "snapped": best_ring_y is not None,
+                })
+
+            cursor += pos_height
+
+        return slots
+
+    # ------------------------------------------------------------------
+    # Step 4: Fill scoring
+    # ------------------------------------------------------------------
+
+    def _fill_score(
+        self, gray: np.ndarray, cx: int, cy: int, r: int,
+        global_thresh: Optional[np.ndarray] = None,
+    ) -> float:
+        """
+        Compute a fill score in [0, 1] for a circular bubble region.
+
+        Three signals combined:
+          1. contrast:   how much darker is the bubble interior vs its surround
+          2. dark_ratio: fraction of pixels below the global adaptive threshold
+          3. mean_ink:   raw mean darkness inside the bubble
+
+        Using a global adaptive threshold (computed once per image) is far
+        more reliable than per-bubble Otsu — small ROIs on empty bubbles give
+        Otsu arbitrary results because there's no bimodal distribution to find.
+        """
+        h, w = gray.shape[:2]
+        r_inner = max(4, int(r * 0.78))
+        r_outer = max(r_inner + 3, int(r * 1.40))
+
+        x1 = max(0, cx - r_outer)
+        x2 = min(w, cx + r_outer + 1)
+        y1 = max(0, cy - r_outer)
+        y2 = min(h, cy + r_outer + 1)
+
+        if x2 <= x1 or y2 <= y1:
+            return 0.0
+
+        roi  = gray[y1:y2, x1:x2].astype(np.float32)
+        rh, rw = roi.shape
+        yy, xx = np.mgrid[:rh, :rw]
+        cx_roi, cy_roi = cx - x1, cy - y1
+        dist2 = (xx - cx_roi) ** 2 + (yy - cy_roi) ** 2
+
+        inner_mask = dist2 <= r_inner ** 2
+        ring_mask  = (dist2 > r_inner ** 2) & (dist2 <= r_outer ** 2)
+
+        n_inner = int(inner_mask.sum())
+        if n_inner == 0:
+            return 0.0
+
+        inner_ink = float((255.0 - roi[inner_mask]).mean() / 255.0)
+        n_ring    = int(ring_mask.sum())
+        bg_ink    = float((255.0 - roi[ring_mask]).mean() / 255.0) if n_ring > 0 else 0.0
+        contrast  = max(0.0, inner_ink - bg_ink)
+
+        # Dark pixel ratio using global adaptive threshold if available
+        if global_thresh is not None:
+            thresh_roi = global_thresh[y1:y2, x1:x2]
+            dark_ratio = float(thresh_roi[inner_mask].sum()) / (255.0 * n_inner)
+        else:
+            # Fallback: pixels darker than mean − 1 std of the inner region
+            inner_vals = roi[inner_mask]
+            dark_cut   = max(0, float(inner_vals.mean()) - float(inner_vals.std()))
+            dark_ratio = float((inner_vals < dark_cut).sum()) / n_inner
+
+        # Weighted combination — contrast is the most reliable signal
+        score = 0.50 * contrast + 0.35 * dark_ratio + 0.15 * inner_ink
+        return float(np.clip(score, 0.0, 1.0))
+
+    # ------------------------------------------------------------------
+    # Step 5: Winner selection per position
+    # ------------------------------------------------------------------
+
+    def _select_winners(self, slots: List[Dict]) -> List[DetectedVote]:
+        """
+        For each position:
+        - Single-winner: pick top candidate if score >= FILL_THRESHOLD AND
+          it beats the runner-up by at least MIN_GAP_SINGLE.
+        - Multi-winner: select candidates in descending score order that
+          exceed FILL_FLOOR_MULTI, up to votes_allowed.
+        """
+        # Group by position
+        by_pos: Dict[int, List[Dict]] = {}
+        for s in slots:
+            by_pos.setdefault(s["position_id"], []).append(s)
+
+        detected: List[DetectedVote] = []
+
+        for pid, pos_slots in by_pos.items():
+            ranked = sorted(pos_slots, key=lambda s: s["fill_score"], reverse=True)
+            votes_allowed = max(1, int(ranked[0]["position_vote_limit"]))
+
+            if votes_allowed == 1:
+                # Single winner
+                top = ranked[0]
+                runner = ranked[1] if len(ranked) > 1 else None
+                gap = (
+                    top["fill_score"] - runner["fill_score"]
+                    if runner else 1.0
+                )
+                if top["fill_score"] >= FILL_THRESHOLD and gap >= MIN_GAP_SINGLE:
+                    top["detected"] = True
+                    top["detection_mode"] = "single_winner"
+                    confidence = min(1.0, top["fill_score"])
+                    detected.append(self._make_vote(top, confidence))
+                else:
+                    # Mark as not detected in debug
+                    for s in pos_slots:
+                        s.setdefault("detected", False)
+                        s.setdefault("detection_mode", "ambiguous" if top["fill_score"] >= FILL_THRESHOLD else "below_threshold")
+            else:
+                # Multi-winner
+                selected = 0
+                for s in ranked:
+                    if selected >= votes_allowed:
+                        break
+                    if s["fill_score"] >= FILL_FLOOR_MULTI:
+                        s["detected"] = True
+                        s["detection_mode"] = "multi_winner"
+                        confidence = min(1.0, s["fill_score"])
+                        detected.append(self._make_vote(s, confidence))
+                        selected += 1
+
+            # Ensure all slots have detected flag for debug output
+            for s in pos_slots:
+                s.setdefault("detected", False)
+                s.setdefault("detection_mode", "not_selected")
+
+        return detected
+
+    @staticmethod
+    def _make_vote(slot: Dict, confidence: float) -> DetectedVote:
+        return DetectedVote(
+            position_id=slot["position_id"],
+            candidate_id=slot["candidate_id"],
+            candidate_name=slot.get("candidate_name"),
+            candidate_party=slot.get("candidate_party"),
+            position_name=slot.get("position_name"),
+            confidence=confidence,
+            row=slot["row"],
+            col=slot["col"],
+        )
+
+    # ------------------------------------------------------------------
+    # Debug utilities
+    # ------------------------------------------------------------------
+
+    def _build_debug_overlay(
+        self, img: np.ndarray, bubbles: List[Dict]
     ) -> Optional[str]:
-        """Create a temporary debug overlay image for scanner tuning."""
+        """Draw bubble locations and scores on a copy of the image."""
         try:
-            if image is None or image.size == 0:
-                return None
+            canvas = img.copy()
+            h, w = canvas.shape[:2]
+            bubble_r = max(8, int(min(h, w) * BUBBLE_RADIUS_FRAC))
 
-            canvas = image.copy()
-            overlay = canvas.copy()
-            height, width = canvas.shape[:2]
+            for b in bubbles:
+                cx, cy = int(b.get("cx", 0)), int(b.get("cy", 0))
+                score = float(b.get("fill_score", 0.0))
+                detected = bool(b.get("detected", False))
 
-            for scope_idx, (x1, y1, x2, y2) in enumerate(scan_scopes):
-                x1 = int(np.clip(x1, 0, max(0, width - 1)))
-                x2 = int(np.clip(x2, 0, max(0, width - 1)))
-                y1 = int(np.clip(y1, 0, max(0, height - 1)))
-                y2 = int(np.clip(y2, 0, max(0, height - 1)))
-                color = (0, 255, 120)
-                thickness = 1
-                cv2.rectangle(overlay, (x1, y1), (x2, y2), color, thickness)
-                label = f"section scope {scope_idx + 1}"
+                color = (0, 200, 60) if detected else (0, 120, 255)
+                cv2.circle(canvas, (cx, cy), bubble_r, color, 2)
                 cv2.putText(
-                    overlay,
-                    label,
-                    (x1 + 4, max(18, y1 - 8)),
+                    canvas,
+                    f"{score:.2f}",
+                    (cx + bubble_r + 2, cy + 4),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.45,
+                    0.38,
                     color,
                     1,
                     cv2.LINE_AA,
                 )
 
-            for index, (top, bottom) in enumerate(section_bands):
-                top_y = int(np.clip(top, 0, max(0, height - 1)))
-                bottom_y = int(np.clip(bottom, 0, max(0, height - 1)))
-                cv2.rectangle(overlay, (0, top_y), (int(width * 0.35), bottom_y), (180, 80, 255), 1)
-                cv2.putText(
-                    overlay,
-                    f"band {index + 1}",
-                    (6, max(18, top_y + 16)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    (180, 80, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
-
-            for cx, cy in unique_rings:
-                cv2.circle(overlay, (int(cx), int(cy)), 3, (255, 220, 0), 1)
-
-            for cx, cy, _ in filled_blob_centers:
-                cv2.circle(overlay, (int(cx), int(cy)), 4, (255, 0, 255), 1)
-
-            for measurement in bubble_measurements:
-                expected_x = int(measurement.get("expected_x", 0))
-                expected_y = int(measurement.get("expected_y", 0))
-                best_x = int(measurement.get("best_x", expected_x))
-                best_y = int(measurement.get("best_y", expected_y))
-                detected = bool(measurement.get("detected", False))
-                marker_color = (40, 210, 40) if detected else (0, 150, 255)
-
-                cv2.circle(overlay, (expected_x, expected_y), 5, (185, 185, 185), 1)
-                cv2.circle(overlay, (best_x, best_y), 6, marker_color, 2)
-                cv2.line(overlay, (expected_x, expected_y), (best_x, best_y), marker_color, 1)
-
-                if detected:
-                    label = f"P{measurement.get('position_id')} C{measurement.get('candidate_id')}"
-                    cv2.putText(
-                        overlay,
-                        label,
-                        (best_x + 8, best_y - 6),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.40,
-                        marker_color,
-                        1,
-                        cv2.LINE_AA,
-                    )
-
-            canvas = cv2.addWeighted(overlay, 0.86, canvas, 0.14, 0)
-            encoded_ok, buffer = cv2.imencode(".jpg", canvas, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
-            if not encoded_ok:
+            ok, buf = cv2.imencode(
+                ".jpg", canvas, [int(cv2.IMWRITE_JPEG_QUALITY), 88]
+            )
+            if not ok:
                 return None
-
-            encoded = base64.b64encode(buffer).decode("utf-8")
-            return f"data:image/jpeg;base64,{encoded}"
+            return "data:image/jpeg;base64," + base64.b64encode(buf).decode()
         except Exception:
             return None
-    
-    def _calculate_fill_ratio(self, dark_mask: np.ndarray, cx: int, cy: int, radius: int) -> float:
-        """Calculate the fill ratio of a circular region."""
-        height, width = dark_mask.shape[:2]
-        
-        x1 = max(0, cx - radius)
-        x2 = min(width, cx + radius)
-        y1 = max(0, cy - radius)
-        y2 = min(height, cy + radius)
-        
-        if x1 >= x2 or y1 >= y2:
-            return 0.0
-        
-        region = dark_mask[y1:y2, x1:x2]
-        if region.size == 0:
-            return 0.0
-        
-        filled_pixels = np.count_nonzero(region)
-        total_pixels = region.size
-        return float(filled_pixels / total_pixels)
-    
-    def calculate_image_quality(self) -> float:
-        """
-        Calculate image quality score based on blur, brightness, and contrast.
-        Returns score from 0.0 to 1.0.
-        """
-        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        
-        # Laplacian variance (focus quality)
-        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        blur_score = min(laplacian_var / 100, 1.0)  # Normalize
-        
-        # Brightness score (not too dark or too bright)
-        mean_brightness = np.mean(gray)
-        brightness_score = 1.0 - abs(mean_brightness - 128) / 128
-        
-        # Contrast score
-        std_dev = np.std(gray)
-        contrast_score = min(std_dev / 64, 1.0)  # Normalize
-        
-        # Weighted average
-        quality_score = (blur_score * 0.5 + brightness_score * 0.25 + contrast_score * 0.25)
-        
-        return quality_score
-    
-    def scan(self, image_base64: str, bubble_candidates: List[BubbleCandidate]) -> ScanResponse:
-        """
-        Main scanning process: load image, detect markers, warp, detect bubbles.
-        """
-        start_time = time.time()
-        errors = []
-        self.processed_preview_image = None
-        
-        # Load image
-        if not self.load_image_base64(image_base64):
-            return ScanResponse(
-                success=False,
-                message="Failed to load image",
-                detected_votes=[],
-                image_quality=0.0,
-                markers_detected=0,
-                processing_time_ms=0.0,
-                errors=["Image loading failed"]
-            )
 
-        # CamScanner-like preprocessing pass for cleaner ballot scans.
-        self.image = self._normalize_ballot_image(self.image)
-        self.processed_preview_image = self._encode_preview_image(self.image)
-        
-        # Detect markers (now disabled - markers removed for simplified layout)
-        markers = []
-        marker_count = 0
-        
-        # Apply perspective warp (now disabled - using original image)
-        warp_success = False
-        
-        # Detect bubbles
-        detected_votes = self.detect_bubbles(bubble_candidates)
-        
-        # Calculate image quality
-        quality_score = self.calculate_image_quality()
-        
-        # Determine success (no longer depends on markers)
-        success = len(detected_votes) > 0
-        
-        processing_time_ms = (time.time() - start_time) * 1000
-        
+    @staticmethod
+    def _encode_jpg(img: np.ndarray, quality: int = 88) -> Optional[str]:
+        ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+        if not ok:
+            return None
+        return "data:image/jpeg;base64," + base64.b64encode(buf).decode()
+
+    @staticmethod
+    def _image_quality(img: np.ndarray) -> float:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        blur_score = min(lap_var / 100.0, 1.0)
+        mean_b = float(np.mean(gray))
+        bright_score = 1.0 - abs(mean_b - 128.0) / 128.0
+        contrast_score = min(float(np.std(gray)) / 64.0, 1.0)
+        return float(0.5 * blur_score + 0.25 * bright_score + 0.25 * contrast_score)
+
+    @staticmethod
+    def _error_response(msg: str, t0: float) -> ScanResponse:
         return ScanResponse(
-            success=success,
-            message="Scan completed successfully" if success else "Scan completed with issues",
-            detected_votes=detected_votes,
-            image_quality=quality_score,
-            markers_detected=marker_count,
-            processing_time_ms=processing_time_ms,
-            errors=errors,
-            debug_bubbles=self.debug_bubbles,
-            debug_visualization_image=self.debug_visualization_image,
-            processed_preview_image=self.processed_preview_image,
+            success=False,
+            message=msg,
+            detected_votes=[],
+            image_quality=0.0,
+            markers_detected=0,
+            processing_time_ms=(time.time() - t0) * 1000,
+            errors=[msg],
         )
