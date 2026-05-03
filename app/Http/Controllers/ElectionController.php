@@ -94,27 +94,8 @@ class ElectionController extends Controller
             abort(403, 'Adviser access only.');
         }
 
-        // Ensure an active election doesn't already exist
-        $activeElection = Election::query()
-            ->where('status', 'active')
-            ->where('id', '!=', $election->id)
-            ->first();
-
-        if ($activeElection) {
-            return redirect()
-                ->route('elections.index')
-                ->with('error', "Election on {$activeElection->election_date->format('F j, Y')} is already active. Stop it first.");
-        }
-
-        // Use transaction to atomically update status
+        // Start this election without forcing other active elections to stop.
         DB::transaction(function () use ($election) {
-            // Stop any currently active election
-            Election::query()
-                ->where('status', 'active')
-                ->where('id', '!=', $election->id)
-                ->update(['status' => 'completed']);
-
-            // Start this election
             $election->update(['status' => 'active']);
         });
 

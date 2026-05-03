@@ -40,6 +40,7 @@ BUBBLE_RADIUS_FRAC = 0.012
 FILL_THRESHOLD   = 0.22    
 MIN_GAP_SINGLE   = 0.06    
 FILL_FLOOR_MULTI = 0.18    
+MIN_GAP_RELATIVE = 0.18
 
 
 class BallotScanner:
@@ -501,7 +502,17 @@ class BallotScanner:
             if votes_allowed == 1:
                 top, runner = ranked[0], ranked[1] if len(ranked) > 1 else None
                 gap = top["fill_score"] - runner["fill_score"] if runner else 1.0
-                if top["fill_score"] >= FILL_THRESHOLD and gap >= MIN_GAP_SINGLE:
+                n_candidates = len(ranked)
+
+                # Adaptive gap handling:
+                # - Relax the absolute gap slightly when the candidate count is odd (layout/centering effects).
+                # - Also allow selection when the relative gap to the top score is sufficiently large.
+                adjusted_min_gap = MIN_GAP_SINGLE
+                if n_candidates > 2 and (n_candidates % 2) == 1:
+                    adjusted_min_gap *= 0.80
+
+                rel_gap = gap / max(1e-6, top["fill_score"])
+                if top["fill_score"] >= FILL_THRESHOLD and (gap >= adjusted_min_gap or rel_gap >= MIN_GAP_RELATIVE):
                     top["detected"], top["detection_mode"] = True, "single_winner"
                     detected.append(self._make_vote(top, min(1.0, top["fill_score"])))
                 else:

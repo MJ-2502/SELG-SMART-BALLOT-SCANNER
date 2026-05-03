@@ -44,7 +44,6 @@ const navItems = computed(() => {
 
     if (isAdviser.value) {
         items.push(
-            { label: 'Live Progress', href: '/admin/progress', active: page.component === 'Admin/Progress', icon: 'bi bi-activity' },           
             { label: 'Election Management', href: '/elections', active: page.url.startsWith('/elections'), icon: 'bi bi-calendar-check' },
             { label: 'Positions', href: '/positions', active: page.url.startsWith('/positions'), icon: 'bi bi-list-task' },
             { label: 'Candidates', href: '/candidates', active: page.url.startsWith('/candidates'), icon: 'bi bi-person-badge' },

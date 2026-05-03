@@ -85,7 +85,6 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
 
     Route::get('/admin/ballot-management', [BallotManagementController::class, 'index'])->name('admin.ballot-management.index');
     Route::delete('/admin/ballot-management/{ballot}', [BallotManagementController::class, 'destroy'])->name('admin.ballot-management.destroy');
-    Route::get('/admin/progress', [ElectionProgressController::class, 'index'])->name('admin.progress');
     Route::get('/admin/reports', [ReportController::class, 'index'])->name('admin.reports.index');
     Route::post('/admin/reports/generate', [ReportController::class, 'store'])->name('admin.reports.store');
     Route::get('/admin/reports/{report}', [ReportController::class, 'show'])->name('admin.reports.show');
