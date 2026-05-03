@@ -20,6 +20,7 @@ watch(sidebarCollapsed, (value) => {
 
 const currentUser = computed(() => page.props.auth?.user ?? null);
 const isAdviser = computed(() => Boolean(currentUser.value?.is_adviser));
+const canUseScanner = computed(() => currentUser.value?.role === 'facilitator');
 const dashboardHref = computed(() => (isAdviser.value ? '/admin' : '/dashboard'));
 
 const navItems = computed(() => {
@@ -30,13 +31,16 @@ const navItems = computed(() => {
             active: page.component === 'Admin/Dashboard' || page.url === '/dashboard' || page.url === '/admin',
             icon: 'bi bi-graph-up',
         },
-        {
+    ];
+
+    if (canUseScanner.value) {
+        items.push({
             label: 'Ballot Scanner',
             href: '/scanner',
             active: page.url.startsWith('/scanner'),
             icon: 'bi bi-upc-scan',
-        },
-    ];
+        });
+    }
 
     if (isAdviser.value) {
         items.push(

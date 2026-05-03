@@ -14,6 +14,7 @@ use App\Http\Controllers\ScannerController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Middleware\IsAdviser;
+use App\Http\Middleware\IsFacilitator;
 use App\Models\Election;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -91,7 +92,7 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
     Route::patch('elections/{election}/facilitators', [ElectionController::class, 'assignFacilitators'])->name('elections.facilitators.assign');
 });
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', IsFacilitator::class])->group(function () {
     Route::get('/scanner', [ScannerController::class, 'index'])->name('scanner.index');
     Route::post('/scanner/scan', [ScannerController::class, 'scan'])->name('scanner.scan');
     Route::post('/scanner/submit', [ScannerController::class, 'submit'])->name('scanner.submit');

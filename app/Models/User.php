@@ -42,6 +42,11 @@ class User extends Authenticatable
         return $this->role === self::ROLE_ADVISER;
     }
 
+    public function isFacilitator(): bool
+    {
+        return $this->role === self::ROLE_FACILITATOR;
+    }
+
     public function facilitatedElections(): HasMany
     {
         return $this->hasMany(Election::class, 'facilitator_id');

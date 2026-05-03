@@ -21,16 +21,19 @@ class ScannerController extends Controller
     {
         $user = auth()->user();
 
+        abort_if(! $user?->isFacilitator(), 403, 'Facilitator access only.');
+
         $electionsQuery = Election::query()->orderByDesc('election_date');
 
-        if (! $user?->isAdviser()) {
-            $electionsQuery->where(function ($query) use ($user) {
-                $query->whereHas('facilitators', fn ($facilitatorQuery) => $facilitatorQuery->where('users.id', $user?->id))
-                    ->orWhere('facilitator_id', $user?->id);
-            });
-        }
+        $electionsQuery->where(function ($query) use ($user) {
+            $query->whereHas('facilitators', fn ($facilitatorQuery) => $facilitatorQuery->where('users.id', $user?->id))
+                ->orWhere('facilitator_id', $user?->id);
+        });
 
         $elections = $electionsQuery->get();
+        
+        // --- NEW: Find the single active election ---
+        $active = $elections->where('status', 'active')->first();
 
         $positions = Position::query()
             ->with(['candidates' => fn ($query) => $query->where('is_active', true)->orderBy('name')->orderBy('id')])
@@ -54,6 +57,13 @@ class ScannerController extends Controller
                 'id' => $election->id,
                 'label' => $election->label,
             ])->values(),
+
+            // --- NEW: Pass the active election directly to Vue ---
+            'activeElection' => $active ? [
+                'id' => $active->id,
+                'name' => $active->label ?? $active->election_name, // Maps your Laravel 'label' to Vue's 'name'
+            ] : null,
+
             'positions' => $positions->map(fn (Position $position) => [
                 'id' => $position->id,
                 'name' => $position->name,
@@ -300,6 +310,7 @@ class ScannerController extends Controller
     public function submit(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            'ballot_id' => ['nullable', 'integer', 'exists:ballots,id'],
             'image_hash' => ['required', 'string', 'size:64'],
             'election_id' => ['nullable', 'integer', 'exists:elections,id'],
             'ballot_number' => ['nullable', 'integer', 'min:1'],
@@ -323,21 +334,6 @@ class ScannerController extends Controller
                 'message' => 'Duplicate ballot detected. This scan was already submitted.',
                 'errors' => ['Duplicate image hash.'],
             ], 409);
-        }
-
-        if (! empty($validated['election_id']) && ! empty($validated['ballot_number'])) {
-            $ballotNumberExists = Ballot::query()
-                ->where('election_id', $validated['election_id'])
-                ->where('ballot_number', $validated['ballot_number'])
-                ->exists();
-
-            if ($ballotNumberExists) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'The ballot number already exists for this election.',
-                    'errors' => ['Duplicate ballot number for election.'],
-                ], 422);
-            }
         }
 
         $candidateMap = Candidate::query()
@@ -386,11 +382,19 @@ class ScannerController extends Controller
         }
 
         $ballot = DB::transaction(function () use ($validated, $votesByPosition) {
-            $ballot = Ballot::query()->create([
-                'election_id' => $validated['election_id'] ?? null,
-                'ballot_number' => $validated['ballot_number'] ?? null,
-                'uuid' => (string) Str::uuid(),
-                'image_hash' => $validated['image_hash'],
+            $ballotQuery = Ballot::query();
+
+            if (! empty($validated['ballot_id'])) {
+                $ballotQuery->where('id', $validated['ballot_id']);
+            } else {
+                $ballotQuery->where('election_id', $validated['election_id'] ?? null)
+                    ->where('ballot_number', $validated['ballot_number'] ?? null);
+            }
+
+            $ballot = $ballotQuery->firstOrFail();
+
+            $ballot->update([
+                'image_hash' => $validated['image_hash'] ?? null,
                 'scanned_at' => now(),
                 'scanned_by' => auth()->id(),
                 'status' => 'scanned',
@@ -485,12 +489,8 @@ class ScannerController extends Controller
     {
         $user = auth()->user();
 
-        if (! $user) {
+        if (! $user || ! $user->isFacilitator()) {
             return false;
-        }
-
-        if ($user->isAdviser()) {
-            return true;
         }
 
         return Election::query()

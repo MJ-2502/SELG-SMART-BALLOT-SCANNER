@@ -6,10 +6,8 @@ import AdminLayout from '@/Layouts/AdminLayout.vue';
 defineOptions({ layout: AdminLayout });
 
 const props = defineProps({
-    elections: {
-        type: Array,
-        default: () => [],
-    },
+    activeElection: Object,
+
     positions: {
         type: Array,
         default: () => [],
@@ -42,12 +40,12 @@ const guideFrame = ref(null);
 const captureCanvas = ref(null);
 const analysisCanvas = ref(null);
 
-const selectedElectionId = ref('');
 const ballotNumber = ref('');
 const debugMode = ref(false);
 
 const resultJsonText = ref('No scan yet.');
 const detectedVotes = ref([]);
+const selectedElectionId = ref('');
 
 // ── Scan phase state machine ─────────────────────────────────────────
 // idle → scanning → validating → submitting → submitted → idle
@@ -278,6 +276,50 @@ const setPreviewFromBlob = (blob) => {
     previewObjectUrl = URL.createObjectURL(blob);
     previewImageSrc.value = previewObjectUrl;
     capturedBlob = blob;
+};
+
+const processScan = async (base64Image) => {
+    // 1. Safety Checks
+    if (!props.activeElection) {
+        alert("You are not currently assigned to an active election.");
+        return;
+    }
+    if (!ballotNumber.value) {
+        alert("Please enter the Printed Ballot Number before scanning.");
+        return;
+    }
+
+    try {
+        resultJsonText.value = "1/2: Analyzing bubbles with Python...";
+        
+        // STEP 1: Send the raw image to your Python scanner route
+        const scanResponse = await axios.post(props.scanUrl, {
+            image: base64Image,
+            election_id: props.activeElection.id,
+            debug: debugMode.value
+        });
+        
+        // If Python successfully read the bubbles, proceed to save them
+        resultJsonText.value = "2/2: Saving votes to database...";
+        
+        // STEP 2: Send the parsed votes PLUS the ballot_number to Laravel
+        const submitResponse = await axios.post(props.submitUrl, {
+            ...scanResponse.data,                 // This unpacks the votes from Python!
+            election_id: props.activeElection.id, // The assigned election
+            ballot_number: ballotNumber.value,    // <-- The crucial link to the official ballot!
+        });
+
+        resultJsonText.value = JSON.stringify(submitResponse.data, null, 2);
+        console.log("Scan & Save successful:", submitResponse.data);
+        
+        // Success! Clear the ballot number input so the Adviser can type the next one
+        ballotNumber.value = '';
+
+    } catch (error) {
+        console.error("Scan failed:", error);
+        resultJsonText.value = JSON.stringify(error.response?.data || error.message, null, 2);
+        alert(error.response?.data?.message || error.response?.data?.error || "Scanning failed. Please try again.");
+    }
 };
 
 const onFileChange = () => {
@@ -982,9 +1024,14 @@ onMounted(async () => {
 
     // Read URL params — set by the dashboard "Start Scanning" link
     const params = new URLSearchParams(window.location.search);
-
     const electionIdParam = params.get('election_id');
-    if (electionIdParam) {
+
+    // --- NEW FIX: AUTO-SELECT ELECTION ---
+    // If the facilitator is only assigned to 1 election, auto-select it immediately.
+    // Otherwise, try to use the URL parameter.
+    if (props.elections && props.elections.length === 1) {
+        selectedElectionId.value = String(props.elections[0].id);
+    } else if (electionIdParam) {
         selectedElectionId.value = electionIdParam;
     }
 
@@ -1022,7 +1069,21 @@ onBeforeUnmount(() => {
         <!-- ── STEP 1: Ballot number ── -->
         <div v-show="!mobileCameraActive" class="px-4 sm:px-0 mt-3">
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <label class="block">
+                
+                <div class="mb-4">
+                    <span class="block text-sm font-semibold text-slate-700 mb-2">Assigned Election</span>
+                    
+                    <div v-if="activeElection" class="block w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-base font-medium text-slate-700">
+                        {{ activeElection.name }}
+                    </div>
+                    
+                    <div v-else class="w-full rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600 flex items-center gap-2">
+                        <i class="bi bi-exclamation-triangle-fill text-red-500" aria-hidden="true"></i>
+                        No active election assigned. Contact the Adviser.
+                    </div>
+                </div>
+
+                <label v-if="activeElection" class="block">
                     <span class="flex items-center gap-1.5 text-sm font-semibold text-slate-700 mb-2">
                         <i class="bi bi-file-text text-indigo-500 text-base leading-none" aria-hidden="true"></i>
                         Ballot Number
@@ -1038,13 +1099,7 @@ onBeforeUnmount(() => {
                         :class="ballotNumber.trim() ? 'border-emerald-400 bg-emerald-50/40' : ''"
                     />
                 </label>
-                <label v-if="elections.length > 1" class="block mt-3">
-                    <span class="block text-sm font-semibold text-slate-700 mb-2">Election</span>
-                    <select v-model="selectedElectionId" class="block w-full rounded-xl border-slate-300 text-base focus:border-indigo-500 focus:ring-indigo-500">
-                        <option value="">Use current layout</option>
-                        <option v-for="election in elections" :key="election.id" :value="String(election.id)">{{ election.label }}</option>
-                    </select>
-                </label>
+                
             </div>
         </div>
 
