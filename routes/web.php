@@ -90,6 +90,7 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
     Route::post('/admin/reports/generate', [ReportController::class, 'store'])->name('admin.reports.store');
     Route::get('/admin/reports/{report}', [ReportController::class, 'show'])->name('admin.reports.show');
     Route::get('/admin/reports/{report}/print', [ReportController::class, 'print'])->name('admin.reports.print');
+    Route::patch('/admin/reports/{report}/resolve-tie', [ReportController::class, 'resolveTie'])->name('admin.reports.resolve-tie');
     Route::patch('elections/{election}/facilitators', [ElectionController::class, 'assignFacilitators'])->name('elections.facilitators.assign');
 
     // Election Results Routes

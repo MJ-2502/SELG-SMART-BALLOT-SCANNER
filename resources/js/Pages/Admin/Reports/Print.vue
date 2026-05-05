@@ -84,6 +84,11 @@ const getPercent = (votes, total) => {
                     </thead>
                     <tbody>
                         <template v-for="position in winnersByPosition" :key="position.position_id">
+                            <tr v-if="position.has_tie" class="tie-row">
+                                <td colspan="4" class="tie-cell">
+                                    Tie detected at {{ position.tied_vote_count }} votes. Manual resolution required for {{ position.seats_remaining ?? position.votes_allowed }} seat(s).
+                                </td>
+                            </tr>
                             <tr v-for="(winner, index) in position.winners" :key="winner.id">
                                 <td v-if="index === 0" :rowspan="position.winners.length" class="cell-group-head">{{ position.position_name }}</td>
                                 <td class="font-bold">⭐ {{ winner.name }}</td>
@@ -273,6 +278,14 @@ const getPercent = (votes, total) => {
 }
 
 .winner-table td {
+    border-color: #fde68a;
+}
+
+.tie-row td,
+.tie-cell {
+    background-color: #fffbeb;
+    color: #92400e;
+    font-weight: 700;
     border-color: #fde68a;
 }
 

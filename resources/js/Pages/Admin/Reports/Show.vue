@@ -1,6 +1,6 @@
 <script setup>
-import { computed } from 'vue';
-import { Head, Link } from '@inertiajs/vue3';
+import { computed, ref } from 'vue';
+import { Head, Link, router } from '@inertiajs/vue3';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
 defineOptions({ layout: AdminLayout });
@@ -12,6 +12,92 @@ const props = defineProps({
 
 const winnersByPosition = computed(() => props.reportData?.winners ?? []);
 const hasWinners = computed(() => Array.isArray(winnersByPosition.value) && winnersByPosition.value.length > 0);
+const tiePositions = computed(() => winnersByPosition.value.filter((position) => position.has_tie));
+
+const tieSelections = ref({});
+const tieNotes = ref({});
+const tieErrors = ref({});
+const tieSaving = ref({});
+
+const seatsRequired = (position) => Number(position.seats_remaining ?? position.votes_allowed ?? 1);
+const getSelectedIds = (positionId) => tieSelections.value[positionId] ?? [];
+
+const toggleTieSelection = (position, candidateId) => {
+    const positionId = String(position.position_id);
+    const limit = seatsRequired(position);
+    const current = new Set(getSelectedIds(positionId));
+
+    if (current.has(candidateId)) {
+        current.delete(candidateId);
+    } else {
+        if (current.size >= limit) {
+            tieErrors.value = {
+                ...tieErrors.value,
+                [positionId]: `Select exactly ${limit} winner(s).`,
+            };
+            return;
+        }
+        current.add(candidateId);
+    }
+
+    tieSelections.value = {
+        ...tieSelections.value,
+        [positionId]: Array.from(current),
+    };
+    tieErrors.value = {
+        ...tieErrors.value,
+        [positionId]: '',
+    };
+};
+
+const submitTieResolution = async (position) => {
+    const positionId = String(position.position_id);
+    const limit = seatsRequired(position);
+    const selected = getSelectedIds(positionId);
+
+    if (selected.length !== limit) {
+        tieErrors.value = {
+            ...tieErrors.value,
+            [positionId]: `Select exactly ${limit} winner(s) to resolve this tie.`,
+        };
+        return;
+    }
+
+    tieSaving.value = { ...tieSaving.value, [positionId]: true };
+    tieErrors.value = { ...tieErrors.value, [positionId]: '' };
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+
+    try {
+        const response = await fetch(`/admin/reports/${props.report.id}/resolve-tie`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({
+                position_id: position.position_id,
+                winner_ids: selected,
+                note: tieNotes.value[positionId] || null,
+            }),
+        });
+
+        const payload = await response.json();
+        if (!response.ok || payload?.success === false) {
+            throw new Error(payload?.message || 'Unable to save tie resolution.');
+        }
+
+        router.reload({ preserveScroll: true });
+    } catch (error) {
+        tieErrors.value = {
+            ...tieErrors.value,
+            [positionId]: error?.message || 'Unable to save tie resolution.',
+        };
+    } finally {
+        tieSaving.value = { ...tieSaving.value, [positionId]: false };
+    }
+};
 
 const getPercent = (votes, total) => {
     if (!total || total === 0) return 0;
@@ -64,6 +150,79 @@ const getPercent = (votes, total) => {
                 </table>
             </div>
 
+            <div v-if="tiePositions.length" class="mb-10 rounded-2xl border border-amber-200 bg-amber-50/40 p-5">
+                <h2 class="text-lg font-bold text-amber-900 mb-2">Resolve Ties</h2>
+                <p class="text-sm text-amber-800 mb-4">Select the final winner(s) for each tied position and save the resolution.</p>
+
+                <div class="space-y-4">
+                    <div v-for="position in tiePositions" :key="position.position_id" class="rounded-xl border border-amber-200 bg-white p-4">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <p class="text-sm font-semibold text-slate-900">{{ position.position_name }}</p>
+                                <p class="text-xs text-slate-500">Tie at {{ position.tied_vote_count }} votes</p>
+                            </div>
+                            <span class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                                Select {{ seatsRequired(position) }} winner(s)
+                            </span>
+                        </div>
+
+                        <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                            <label v-for="candidate in position.tied_candidates ?? []" :key="candidate.id"
+                                class="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm cursor-pointer"
+                                :class="getSelectedIds(String(position.position_id)).includes(candidate.id)
+                                    ? 'border-emerald-300 bg-emerald-50'
+                                    : 'border-slate-200 bg-white'">
+                                <div class="flex items-center gap-3">
+                                    <input
+                                        type="checkbox"
+                                        class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                        :checked="getSelectedIds(String(position.position_id)).includes(candidate.id)"
+                                        @change="toggleTieSelection(position, candidate.id)"
+                                    />
+                                    <div>
+                                        <p class="font-semibold text-slate-900">{{ candidate.name }}</p>
+                                        <p class="text-xs text-slate-500">{{ candidate.party || '-' }}</p>
+                                    </div>
+                                </div>
+                                <span class="text-xs font-semibold text-slate-600">{{ candidate.votes }} votes</span>
+                            </label>
+                        </div>
+
+                        <p v-if="(position.tied_candidates ?? []).length === 0" class="mt-3 text-sm text-amber-700">
+                            No tied candidates were recorded in this report. Regenerate the report to resolve this tie.
+                        </p>
+
+                        <div class="mt-3">
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">Resolution note (optional)</label>
+                            <textarea
+                                v-model="tieNotes[String(position.position_id)]"
+                                rows="2"
+                                class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                                placeholder="Document the basis for this tie resolution..."
+                            ></textarea>
+                        </div>
+
+                        <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                            <p class="text-xs text-slate-500">
+                                Selected {{ getSelectedIds(String(position.position_id)).length }} / {{ seatsRequired(position) }}
+                            </p>
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-60"
+                                :disabled="tieSaving[String(position.position_id)] || (position.tied_candidates ?? []).length === 0"
+                                @click="submitTieResolution(position)"
+                            >
+                                {{ tieSaving[String(position.position_id)] ? 'Saving...' : 'Save Resolution' }}
+                            </button>
+                        </div>
+
+                        <p v-if="tieErrors[String(position.position_id)]" class="mt-2 text-sm text-amber-700">
+                            {{ tieErrors[String(position.position_id)] }}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
             <div v-if="hasWinners" class="mb-10">
                 <h2 class="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                     <svg class="w-5 h-5 text-amber-500" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg>
@@ -81,6 +240,11 @@ const getPercent = (votes, total) => {
                         </thead>
                         <tbody class="bg-white divide-y divide-slate-100">
                             <template v-for="position in winnersByPosition" :key="position.position_id">
+                                <tr v-if="position.has_tie" class="bg-amber-50/70">
+                                    <td colspan="4" class="px-6 py-3 text-sm font-semibold text-amber-800">
+                                        Tie detected at {{ position.tied_vote_count }} votes. Manual resolution required for {{ position.seats_remaining ?? position.votes_allowed }} seat(s).
+                                    </td>
+                                </tr>
                                 <tr v-for="(winner, index) in position.winners" :key="winner.id" class="hover:bg-slate-50 transition-colors">
                                     <td v-if="index === 0" :rowspan="position.winners.length" class="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-800 border-r border-slate-100 align-top bg-slate-50/50">
                                         {{ position.position_name }}
