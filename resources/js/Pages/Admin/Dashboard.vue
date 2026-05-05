@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { Chart, registerables } from 'chart.js';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
@@ -18,7 +18,7 @@ const props = defineProps({
 
 const showElectionModal = ref(false);
 const showCompletionPopup = ref(false);
-const completionWinners = ref([]);
+const completionHandled = ref(false);
 
 // --- Computed helpers ---
 const positionTallies = computed(() => props.tallyData?.position_tallies ?? []);
@@ -187,11 +187,21 @@ onBeforeUnmount(() => { destroyPositionCharts(); resizeObserver?.disconnect(); }
 let pollTimer = null;
 const POLL_INTERVAL_MS = 5000;
 
+const refreshDashboard = () => {
+    try {
+        const path = window.location.pathname + window.location.search;
+        router.get(path, {}, { preserveState: true, preserveScroll: true, only: ['selectedElection', 'tallyData', 'stats', 'hasElection', 'availableElections'] });
+    } catch (e) {
+        try { window.location.reload(); } catch (_) {}
+    }
+};
+
 const startElectionStatusPoll = () => {
     stopElectionStatusPoll();
     if (!props.selectedElection?.id) return;
     pollTimer = setInterval(async () => {
         try {
+            if (completionHandled.value) return;
             const res = await fetch(`/api/elections/${props.selectedElection.id}/status`);
             if (!res.ok) return;
             const json = await res.json();
@@ -216,14 +226,18 @@ const startElectionStatusPoll = () => {
 
             // If status changed to completed, show popup; otherwise just refresh tally
             if (hasStatusChanged && String(status).toLowerCase() === 'completed') {
-                completionWinners.value = electedCandidates.value;
+                completionHandled.value = true;
+                stopElectionStatusPoll();
+                stopEchoListener();
                 showCompletionPopup.value = true;
-                setTimeout(() => {
-                    window.location.reload();
-                }, 3000);
+                // Do not auto-refresh here; keep popup visible until user dismisses it.
             } else if (hasTallyChanged) {
-                // Tally changed but election still active; just show the update
-                // In a more advanced setup, you'd update props reactively
+                // Tally changed but election still active; refresh to show updates.
+                // A full reload is the simplest reliable way to update server-provided props.
+                try {
+                    console.debug('Dashboard: tally changed, reloading to refresh data');
+                } catch (e) {}
+                refreshDashboard();
             }
         } catch (e) {
             // ignore transient errors
@@ -240,6 +254,7 @@ const stopElectionStatusPoll = () => {
 
 watch(() => props.selectedElection?.id, (newId, oldId) => {
     if (newId !== oldId) {
+        completionHandled.value = false;
         if (window?.Echo) {
             stopEchoListener();
             startEchoListener();
@@ -257,17 +272,25 @@ const startEchoListener = () => {
     if (!id || !window?.Echo) return;
     try {
         echoChannel = window.Echo.channel(`election.${id}`);
-        echoChannel.listen('.ElectionCompleted', (payload) => {
-            // If election completed, show popup instead of reloading
+
+        // Listen for broadcastAs name with and without dot prefix to be resilient
+        const handleCompletion = (payload) => {
+            try { console.debug('Received ElectionCompleted payload', payload); } catch (e) {}
             if (payload?.status === 'completed') {
-                completionWinners.value = electedCandidates.value;
+                if (completionHandled.value) return;
+                completionHandled.value = true;
+                stopElectionStatusPoll();
+                stopEchoListener();
                 showCompletionPopup.value = true;
-                // Refresh the election data after a delay
-                setTimeout(() => {
-                    window.location.reload();
-                }, 3000);
+                // Do not auto-refresh here; let the user dismiss the popup when ready.
+                return;
             }
-        });
+            // For other updates (e.g., tally change), refresh immediately
+            refreshDashboard();
+        };
+
+        echoChannel.listen('.ElectionCompleted', handleCompletion);
+        echoChannel.listen('ElectionCompleted', handleCompletion);
     } catch (err) {
         // fallback to polling if Echo subscription fails
         startElectionStatusPoll();
@@ -586,37 +609,15 @@ const stopEchoListener = () => {
                         <p class="mt-2 text-sm leading-6 text-emerald-50">{{ selectedElection?.election_name }} results are final</p>
                     </div>
 
-                    <!-- Winners list -->
+                    <!-- Completion message -->
                     <div class="flex-1 overflow-y-auto p-6">
-                        <h3 class="text-base font-semibold text-slate-900 mb-4">Elected Candidates</h3>
-                        
-                        <div v-if="electedCandidates.length" class="space-y-3">
-                            <div v-for="(winner, index) in electedCandidates" :key="`winner-${index}`" class="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
-                                <div class="flex items-start gap-3">
-                                    <div class="h-3 w-3 flex-shrink-0 rounded-full mt-1" :style="{ backgroundColor: winner.color_code || '#10b981' }"></div>
-                                    <div class="flex-1 min-w-0">
-                                        <p class="font-semibold text-slate-900">{{ winner.candidate_name }}</p>
-                                        <p class="text-sm text-slate-600 mt-0.5">
-                                            {{ winner.position_name }}
-                                            <span v-if="winner.candidate_party" class="text-slate-400">· {{ winner.candidate_party }}</span>
-                                        </p>
-                                    </div>
-                                    <div class="flex-shrink-0 text-right">
-                                        <p class="text-lg font-bold text-emerald-700">{{ winner.votes }}</p>
-                                        <p class="text-xs text-slate-500">votes</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div v-else class="rounded-lg bg-slate-50 p-4 text-center text-sm text-slate-500">
-                            No election results available yet.
-                        </div>
-
-                        <div class="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
                             <p class="text-sm text-slate-700">
                                 <strong>{{ selectedElection?.election_name }}</strong> has been successfully completed.
                                 All ballots have been scanned and results have been generated.
+                            </p>
+                            <p class="mt-3 text-sm text-slate-600">
+                                Use the button below to view the full election results.
                             </p>
                         </div>
                     </div>

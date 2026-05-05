@@ -1071,9 +1071,7 @@ const showCompletionNotice = (title = 'Election Complete') => {
     };
 
     stopCamera();
-    completionRedirectTimer = window.setTimeout(() => {
-        router.visit('/dashboard');
-    }, 2500);
+    // Keep the completion modal open; do not auto-redirect.
 };
 
 // Focus the primary action when the completion notice appears (accessibility)
@@ -1686,46 +1684,26 @@ onBeforeUnmount(() => {
             class="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4"
             role="dialog" aria-modal="true" aria-labelledby="completionModalTitle">
 
-            <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-md"></div>
+            <div class="absolute inset-0 bg-slate-900/70 backdrop-blur-sm"></div>
 
             <!-- Mobile bottom-sheet on small screens, centered card on larger -->
-            <div class="relative w-full max-w-md overflow-hidden rounded-t-3xl sm:rounded-3xl border border-emerald-200 bg-white shadow-2xl">
-                <div class="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-6 text-center">
-                    <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/20">
+            <div class="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-slate-200 bg-white shadow-2xl">
+                <div class="bg-emerald-600 px-6 py-6 text-center">
+                    <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white/20">
                         <i class="bi bi-check2-circle text-3xl text-white leading-none" aria-hidden="true"></i>
                     </div>
                     <h2 id="completionModalTitle" class="text-lg sm:text-2xl font-bold tracking-tight text-white">{{ completionNotice.title }}</h2>
-                    <p class="mt-2 text-sm leading-6 text-emerald-50" aria-live="polite">{{ completionNotice.message }}</p>
+                    <p class="mt-2 text-sm leading-6 text-emerald-100" aria-live="polite">{{ completionNotice.message }}</p>
                 </div>
 
-                <div class="px-6 py-5 space-y-4">
-                    <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                        <p class="font-semibold text-slate-900">What happens next</p>
-                        <p class="mt-1">The scanner will close and your facilitator dashboard will open so you can review results.</p>
-                    </div>
-
-                    <div class="flex items-center gap-3">
-                        <div class="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-200">
-                            <div class="h-full w-full animate-pulse rounded-full bg-emerald-500"></div>
-                        </div>
-                        <span class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Redirecting</span>
-                    </div>
-                </div>
-
-                <div class="px-6 pb-6 space-y-3">
+                
+                <div class="px-6 pt-4 pb-6 space-y-3">
                     <button
                         ref="completionPrimaryBtn"
                         type="button"
-                        class="w-full rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
+                        class="w-full rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
                         @click="finishScanAndReturnToDashboard">
                         Return to Dashboard Now
-                    </button>
-
-                    <button
-                        type="button"
-                        class="w-full rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm"
-                        @click="() => { completionNotice.value = null; startCamera(); }">
-                        Stay on Scanner
                     </button>
                 </div>
             </div>

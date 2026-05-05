@@ -8,10 +8,12 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Election extends Model
 {
     use HasFactory;
+    use SoftDeletes;
 
     protected $appends = [
         'label',
@@ -31,6 +33,7 @@ class Election extends Model
         return [
             'election_date' => 'datetime',
             'completed_at' => 'datetime',
+            'deleted_at' => 'datetime',
             'ballot_print_quantity' => 'integer',
             'status' => 'string',
         ];

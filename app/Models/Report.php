@@ -26,6 +26,6 @@ class Report extends Model
 
     public function election(): BelongsTo
     {
-        return $this->belongsTo(Election::class);
+        return $this->belongsTo(Election::class)->withTrashed();
     }
 }

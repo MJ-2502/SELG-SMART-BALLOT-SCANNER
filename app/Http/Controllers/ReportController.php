@@ -88,4 +88,23 @@ class ReportController extends Controller
             'reportData' => $reportData,
         ]);
     }
+
+    public function print(Report $report): Response
+    {
+        $report->loadMissing('election');
+        $report->setAttribute('generated_date_formatted', $report->generated_date?->format('M j, Y g:i A'));
+
+        if ($report->election) {
+            $report->election->setAttribute('election_date_formatted', $report->election->election_date?->format('F j, Y g:i A'));
+        }
+
+        $reportData = is_array($report->report_data)
+            ? $report->report_data
+            : (json_decode((string) $report->report_data, true) ?: []);
+
+        return Inertia::render('Admin/Reports/Print', [
+            'report' => $report,
+            'reportData' => $reportData,
+        ]);
+    }
 }
