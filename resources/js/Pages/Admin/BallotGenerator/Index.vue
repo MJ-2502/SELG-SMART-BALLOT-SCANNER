@@ -31,7 +31,7 @@ const form = useForm({ election_id: props.targetElection?.id ?? '', print_count:
             </div>
 
             <div v-if="!targetElection" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
-                No target election found. Choose an election from Manage Elections or start an active election first.
+                No target election found. Choose an election from Manage Elections or start a pending/active election first.
             </div>
 
             <form v-else class="space-y-4" @submit.prevent="form.post('/admin/ballot-generator/generate')">
@@ -42,13 +42,13 @@ const form = useForm({ election_id: props.targetElection?.id ?? '', print_count:
                     <div class="ui-input bg-slate-50 text-slate-700">
                         {{ targetElection.label }} (Generated: {{ targetElection.ballots_count }})
                     </div>
-                    <p class="mt-1 text-sm text-gray-500">This election was auto-selected from Manage Elections. You can also open this page without an election to target the current active election.</p>
+                    <p class="mt-1 text-sm text-gray-500">This election was auto-selected from pending or active elections. You can also open this page without an election to target the most recent pending or active election.</p>
                 </div>
 
                 <div>
                     <label class="block text-sm font-medium mb-1" for="print_count">Printable ballot count</label>
                     <input id="print_count" v-model="form.print_count" type="number" min="1" max="5000" required class="ui-input" />
-                    <p class="mt-1 text-sm text-gray-500">Example: entering 200 means this election should have 200 uniquely numbered printable ballots.</p>
+                    <p class="mt-1 text-sm text-gray-500">Enter the number of NEW ballots to generate (these will be appended to existing ballots). Example: entering 50 will add 50 more ballots.</p>
                 </div>
 
                 <div class="flex gap-3 mt-6">

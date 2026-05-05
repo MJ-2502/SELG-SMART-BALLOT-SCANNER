@@ -1,10 +1,18 @@
 <script setup>
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, useForm } from '@inertiajs/vue3';
+import { ref } from 'vue';
+import { Teleport } from 'vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
 defineOptions({ layout: AdminLayout });
 
 const props = defineProps({ elections: Array, selectedElection: Object, ballots: Object, statusCounts: Object });
+
+const showGeneratorModal = ref(false);
+const generatorForm = useForm({
+    election_id: props.selectedElection?.id ?? '',
+    print_count: 50,
+});
 
 const confirmDelete = () => window.confirm('Delete this ballot?');
 
@@ -18,6 +26,15 @@ const isLocked = (ballot) => {
 
     return !(finished && pendingNoVotes);
 };
+
+const submitGeneratorForm = () => {
+    generatorForm.post('/admin/ballot-generator/generate', {
+        onSuccess: () => {
+            showGeneratorModal.value = false;
+            generatorForm.reset();
+        },
+    });
+};
 </script>
 
 <template>
@@ -30,8 +47,8 @@ const isLocked = (ballot) => {
                     <p class="text-gray-600">Manage generated ballots by election.</p>
                 </div>
                 <div class="flex gap-2">
-                    <Link href="/admin/ballot-generator" class="ui-btn-secondary">Open Ballot Generator</Link>
-                    <a v-if="selectedElection" :href="`/admin/ballot-generator/print?election=${selectedElection.id}`" class="ui-btn-primary">Open Print Layout</a>
+                    <button @click="showGeneratorModal = true" type="button" class="ui-btn-secondary">Open Ballot Generator</button>
+                    <a v-if="selectedElection" :href="`/admin/ballot-management/print?election=${selectedElection.id}`" class="ui-btn-primary">Open Print Layout</a>
                 </div>
             </div>
 
@@ -146,5 +163,94 @@ const isLocked = (ballot) => {
                 </div>
             </template>
         </div>
+
+        <!-- ── Ballot Generator Modal ──────────────────────────── -->
+        <Teleport to="body">
+            <div
+                v-if="showGeneratorModal"
+                class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                @click.self="showGeneratorModal = false"
+            >
+                <div class="rounded-2xl bg-white shadow-xl max-w-md w-full overflow-hidden">
+                    <!-- Modal Header -->
+                    <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                        <h2 class="text-lg font-semibold text-slate-900">Generate Ballots</h2>
+                        <button
+                            @click="showGeneratorModal = false"
+                            class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                            aria-label="Close modal"
+                            type="button"
+                        >
+                            <i class="bi bi-x text-lg leading-none" aria-hidden="true"></i>
+                        </button>
+                    </div>
+
+                    <!-- Modal Body -->
+                    <form @submit.prevent="submitGeneratorForm" class="p-6 space-y-4">
+                        <!-- Election Selection -->
+                        <div>
+                            <label class="block text-sm font-medium mb-2 text-slate-900">Target Election</label>
+                            <select
+                                v-model="generatorForm.election_id"
+                                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            >
+                                <option value="">-- Select Election --</option>
+                                <option v-for="election in elections" :key="election.id" :value="election.id">
+                                    {{ election.label }} ({{ election.status }}, Ballots: {{ election.ballots_count }})
+                                </option>
+                            </select>
+                            <p class="mt-1 text-xs text-slate-500">
+                                Choose which election to generate ballots for.
+                            </p>
+                        </div>
+
+                        <!-- Print Count -->
+                        <div>
+                            <label class="block text-sm font-medium mb-2 text-slate-900" for="print_count">
+                                Printable Ballot Count
+                            </label>
+                            <input
+                                id="print_count"
+                                v-model.number="generatorForm.print_count"
+                                type="number"
+                                min="1"
+                                max="5000"
+                                required
+                                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            />
+                            <p class="mt-1 text-xs text-slate-500">
+                                Number of NEW ballots to generate and append to the election (1-5000).
+                            </p>
+                        </div>
+
+                        <!-- Error Messages -->
+                        <div v-if="Object.keys(generatorForm.errors).length" class="rounded-lg border border-red-200 bg-red-50 p-3">
+                            <ul class="list-disc pl-5 text-xs text-red-800 space-y-1">
+                                <li v-for="(error, key) in generatorForm.errors" :key="key">{{ error }}</li>
+                            </ul>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="flex gap-3 pt-4 border-t border-slate-100">
+                            <button
+                                type="button"
+                                @click="showGeneratorModal = false"
+                                class="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                :disabled="generatorForm.processing"
+                                class="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                            >
+                                <span v-if="generatorForm.processing">Generating...</span>
+                                <span v-else>Generate & Print</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </Teleport>
     </div>
 </template>

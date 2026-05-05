@@ -7,6 +7,7 @@ use App\Models\Candidate;
 use App\Models\Election;
 use App\Models\Vote;
 use App\Models\Position;
+use App\Services\ElectionCompletionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -62,6 +63,7 @@ class ScannerController extends Controller
             'activeElection' => $active ? [
                 'id' => $active->id,
                 'name' => $active->label ?? $active->election_name, // Maps your Laravel 'label' to Vue's 'name'
+                'expected_ballots' => (int) ($active->ballot_print_quantity ?? 0),
             ] : null,
 
             'positions' => $positions->map(fn (Position $position) => [
@@ -307,7 +309,7 @@ class ScannerController extends Controller
         return response()->json($responseData);
     }
 
-    public function submit(Request $request): JsonResponse
+    public function submit(Request $request, ElectionCompletionService $completionService): JsonResponse
     {
         $validated = $request->validate([
             'ballot_id' => ['nullable', 'integer', 'exists:ballots,id'],
@@ -326,6 +328,19 @@ class ScannerController extends Controller
                 'message' => 'You are not assigned to scan ballots for the selected election.',
                 'errors' => ['Election access denied.'],
             ], 403);
+        }
+
+        // Validate ballot number is within printed/expected range for the election
+        if (! empty($validated['election_id']) && isset($validated['ballot_number'])) {
+            $election = Election::query()->find($validated['election_id']);
+            $expected = (int) ($election->ballot_print_quantity ?? 0);
+            if ($expected > 0 && ($validated['ballot_number'] < 1 || $validated['ballot_number'] > $expected)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Ballot number is out of range for the selected election.',
+                    'errors' => ["Ballot number must be between 1 and {$expected} for this election."],
+                ], 422);
+            }
         }
 
         if (Ballot::query()->where('image_hash', $validated['image_hash'])->exists()) {
@@ -435,6 +450,29 @@ class ScannerController extends Controller
             ];
         })->values()->all();
 
+        // Check if election is now complete
+        $election = $ballot->election;
+        $electionCompleted = false;
+        $electionStatus = null;
+        $winners = null;
+
+        if ($election) {
+            $electionStatus = $completionService->getElectionStatus($election);
+            
+            if ($electionStatus['is_complete'] && $election->status !== 'completed') {
+                try {
+                    $report = $completionService->completeElection($election);
+                    $electionCompleted = (bool) $report;
+                    if ($report) {
+                        $winners = $report->report_data['winners'] ?? [];
+                    }
+                } catch (\Throwable $ex) {
+                    report($ex);
+                    $electionCompleted = false;
+                }
+            }
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Ballot submitted successfully.',
@@ -446,6 +484,9 @@ class ScannerController extends Controller
             ],
             'votes_saved' => count($submittedVotes),
             'submitted_votes' => $submittedVotes,
+            'election_status' => $electionStatus,
+            'election_completed' => $electionCompleted,
+            'winners' => $winners,
         ]);
     }
 

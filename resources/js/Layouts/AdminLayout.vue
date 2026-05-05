@@ -22,6 +22,7 @@ const currentUser = computed(() => page.props.auth?.user ?? null);
 const isAdviser = computed(() => Boolean(currentUser.value?.is_adviser));
 const canUseScanner = computed(() => currentUser.value?.role === 'facilitator');
 const dashboardHref = computed(() => (isAdviser.value ? '/admin' : '/dashboard'));
+const logoUrl = '/images/logo.png';
 
 const navItems = computed(() => {
     const items = [
@@ -45,9 +46,9 @@ const navItems = computed(() => {
     if (isAdviser.value) {
         items.push(
             { label: 'Election Management', href: '/elections', active: page.url.startsWith('/elections'), icon: 'bi bi-calendar-check' },
+            { label: 'Ballot Management', href: '/admin/ballot-management', active: page.url.startsWith('/admin/ballot-management'), icon: 'bi bi-ui-checks-grid' },
             { label: 'Positions', href: '/positions', active: page.url.startsWith('/positions'), icon: 'bi bi-list-task' },
             { label: 'Candidates', href: '/candidates', active: page.url.startsWith('/candidates'), icon: 'bi bi-person-badge' },
-            { label: 'Ballot Management', href: '/admin/ballot-management', active: page.url.startsWith('/admin/ballot-management'), icon: 'bi bi-ui-checks-grid' },
             { label: 'Facilitators', href: '/facilitators', active: page.url.startsWith('/facilitators'), icon: 'bi bi-people' },
             { label: 'Reports', href: '/admin/reports', active: page.component.startsWith('Admin/Reports/'), icon: 'bi bi-file-earmark-bar-graph' },
         );
@@ -68,11 +69,7 @@ function toggleSidebar() {
             <aside class="absolute left-0 top-0 flex h-full w-72 flex-col bg-slate-50 text-slate-800 shadow-2xl">
                 <div class="flex h-16 items-center justify-between border-b border-slate-200 px-5">
                     <div class="flex items-center gap-3">
-                        <div class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-white">
-                                <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" class="h-4 w-4">
-                                    <path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1zM11 .5a.5.5 0 0 1 .5-.5h3A1.5 1.5 0 0 1 16 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 1-.5-.5M.5 11a.5.5 0 0 1 .5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 .5-.5m15 0a.5.5 0 0 1 .5.5v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 1 .5-.5M3 4.5a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5zm3 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0" />
-                                </svg>
-                        </div>
+                            <img :src="logoUrl" alt="SELG Ballot Scanner" class="h-9 w-9 rounded-full object-contain shadow-sm" />
                         <div>
                             <div class="text-sm font-semibold leading-4 text-slate-900">SELG Ballot Scanner</div>
                             <div class="text-xs text-slate-500">Navigation</div>
@@ -150,11 +147,7 @@ function toggleSidebar() {
                     </button>
 
                     <Link :href="dashboardHref" class="flex items-center gap-2 sm:gap-3 min-w-0">
-                        <div class="inline-flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md shadow-indigo-300/60 ring-1 ring-indigo-500/30 shrink-0">
-                            <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor" class="h-3.5 w-3.5 sm:h-4 sm:w-4">
-                                <path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1zM11 .5a.5.5 0 0 1 .5-.5h3A1.5 1.5 0 0 1 16 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 1-.5-.5M.5 11a.5.5 0 0 1 .5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 .5-.5m15 0a.5.5 0 0 1 .5.5v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 1 .5-.5M3 4.5a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5zm3 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0" />
-                            </svg>
-                        </div>
+                        <img :src="logoUrl" alt="SELG Ballot Scanner" class="h-9 w-9 sm:h-10 sm:w-10 rounded-full object-contain shadow-md shadow-indigo-300/30 ring-1 ring-indigo-500/20 shrink-0" />
                         <div class="min-w-0">
                             <div class="text-sm sm:text-base md:text-lg lg:text-xl font-semibold leading-4 sm:leading-5 text-slate-900 truncate">SELG Ballot Scanner</div>
                             <div class="hidden sm:block text-xs text-slate-500 truncate">Election Management System</div>

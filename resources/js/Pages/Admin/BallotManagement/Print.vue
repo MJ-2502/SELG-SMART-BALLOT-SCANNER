@@ -59,10 +59,10 @@ const printBallots = () => {
     <div class="print-shell" :class="`density-${densityMode}`">
         <div class="toolbar">
             <div class="toolbar-title">
-                {{ election?.label }} · {{ paperSize }} · {{ ballots.length }} ballot(s) · {{ perSheet }} per sheet · {{ scalePercent }}%
+                {{ election?.label }} - Ballot Print Layout
             </div>
             <div class="toolbar-actions">
-                <Link href="/admin/ballot-generator">Back to Ballot Generator</Link>
+                <Link href="/admin/ballot-management">Back to Ballot Management</Link>
                 <button type="button" @click="printBallots">Print Ballots</button>
             </div>
         </div>

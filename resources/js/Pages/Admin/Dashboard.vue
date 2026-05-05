@@ -17,9 +17,32 @@ const props = defineProps({
 });
 
 const showElectionModal = ref(false);
+const showCompletionPopup = ref(false);
+const completionWinners = ref([]);
 
 // --- Computed helpers ---
 const positionTallies = computed(() => props.tallyData?.position_tallies ?? []);
+
+// Compute elected candidates (winners by position) from position tallies
+const electedCandidates = computed(() => {
+    const winners = [];
+    positionTallies.value.forEach((position) => {
+        if (!position.candidates || !position.candidates.length) return;
+        const sorted = [...position.candidates].sort((a, b) => (b.votes ?? 0) - (a.votes ?? 0));
+        const topVotes = sorted[0]?.votes ?? 0;
+        const topCandidates = sorted.filter((c) => c.votes === topVotes);
+        topCandidates.forEach((candidate) => {
+            winners.push({
+                position_name: position.position_name,
+                candidate_name: candidate.name,
+                candidate_party: candidate.party,
+                votes: candidate.votes,
+                color_code: candidate.color_code,
+            });
+        });
+    });
+    return winners;
+});
 
 const totalScanned = computed(() => props.tallyData?.summary?.total_scanned ?? props.stats?.ballots_scanned ?? 0);
 
@@ -148,10 +171,119 @@ onMounted(async () => {
         });
         resizeObserver.observe(positionGridRef.value);
     }
+
+    startElectionStatusPoll();
+
+    // Prefer real-time via Laravel Echo when available, but keep polling as a fallback
+    if (window?.Echo) {
+        startEchoListener();
+    }
 });
 
 watch(positionTallies, async () => { await nextTick(); renderPositionCharts(); }, { deep: true });
 onBeforeUnmount(() => { destroyPositionCharts(); resizeObserver?.disconnect(); });
+
+// --- Polling to detect status changes (e.g., completed) and refresh dashboard ---
+let pollTimer = null;
+const POLL_INTERVAL_MS = 5000;
+
+const startElectionStatusPoll = () => {
+    stopElectionStatusPoll();
+    if (!props.selectedElection?.id) return;
+    pollTimer = setInterval(async () => {
+        try {
+            const res = await fetch(`/api/elections/${props.selectedElection.id}/status`);
+            if (!res.ok) return;
+            const json = await res.json();
+            const status = json.data?.status ?? null;
+            const tallySummary = json.tally?.summary ?? null;
+            const currentSummary = props.tallyData?.summary ?? null;
+
+            const hasStatusChanged = status && String(status).toLowerCase() !== String(props.selectedElection?.status ?? '').toLowerCase();
+            const hasTallyChanged = tallySummary && currentSummary && [
+                tallySummary.total_scanned,
+                tallySummary.valid_submissions,
+                tallySummary.flagged_submissions,
+                tallySummary.expected_ballots,
+                tallySummary.turnout_percent,
+            ].some((value, index) => value !== [
+                currentSummary.total_scanned,
+                currentSummary.valid_submissions,
+                currentSummary.flagged_submissions,
+                currentSummary.expected_ballots,
+                currentSummary.turnout_percent,
+            ][index]);
+
+            // If status changed to completed, show popup; otherwise just refresh tally
+            if (hasStatusChanged && String(status).toLowerCase() === 'completed') {
+                completionWinners.value = electedCandidates.value;
+                showCompletionPopup.value = true;
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+            } else if (hasTallyChanged) {
+                // Tally changed but election still active; just show the update
+                // In a more advanced setup, you'd update props reactively
+            }
+        } catch (e) {
+            // ignore transient errors
+        }
+    }, POLL_INTERVAL_MS);
+};
+
+const stopElectionStatusPoll = () => {
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+};
+
+watch(() => props.selectedElection?.id, (newId, oldId) => {
+    if (newId !== oldId) {
+        if (window?.Echo) {
+            stopEchoListener();
+            startEchoListener();
+        } else {
+            startElectionStatusPoll();
+        }
+    }
+});
+
+// --- Laravel Echo real-time listener ---
+let echoChannel = null;
+const startEchoListener = () => {
+    stopEchoListener();
+    const id = props.selectedElection?.id;
+    if (!id || !window?.Echo) return;
+    try {
+        echoChannel = window.Echo.channel(`election.${id}`);
+        echoChannel.listen('.ElectionCompleted', (payload) => {
+            // If election completed, show popup instead of reloading
+            if (payload?.status === 'completed') {
+                completionWinners.value = electedCandidates.value;
+                showCompletionPopup.value = true;
+                // Refresh the election data after a delay
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+            }
+        });
+    } catch (err) {
+        // fallback to polling if Echo subscription fails
+        startElectionStatusPoll();
+    }
+};
+
+const stopEchoListener = () => {
+    try {
+        if (echoChannel && window?.Echo) {
+            window.Echo.leaveChannel(echoChannel.name || `election.${props.selectedElection?.id}`);
+            echoChannel = null;
+        }
+    } catch (e) {
+        // ignore
+    }
+};
 </script>
 
 <template>
@@ -436,6 +568,78 @@ onBeforeUnmount(() => { destroyPositionCharts(); resizeObserver?.disconnect(); }
                 </div>
             </div>
         </div>
+
+        <!-- ── Completion Popup — shows when election is completed ────── -->
+        <Teleport to="body">
+            <div
+                v-if="showCompletionPopup"
+                class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                role="dialog" aria-modal="true" aria-labelledby="completionTitle"
+            >
+                <div class="rounded-2xl bg-white shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden">
+                    <!-- Header with gradient -->
+                    <div class="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-7 text-center">
+                        <div class="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/20">
+                            <i class="bi bi-trophy-fill text-3xl text-white leading-none" aria-hidden="true"></i>
+                        </div>
+                        <h2 id="completionTitle" class="text-2xl font-bold tracking-tight text-white">Election Complete</h2>
+                        <p class="mt-2 text-sm leading-6 text-emerald-50">{{ selectedElection?.election_name }} results are final</p>
+                    </div>
+
+                    <!-- Winners list -->
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <h3 class="text-base font-semibold text-slate-900 mb-4">Elected Candidates</h3>
+                        
+                        <div v-if="electedCandidates.length" class="space-y-3">
+                            <div v-for="(winner, index) in electedCandidates" :key="`winner-${index}`" class="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+                                <div class="flex items-start gap-3">
+                                    <div class="h-3 w-3 flex-shrink-0 rounded-full mt-1" :style="{ backgroundColor: winner.color_code || '#10b981' }"></div>
+                                    <div class="flex-1 min-w-0">
+                                        <p class="font-semibold text-slate-900">{{ winner.candidate_name }}</p>
+                                        <p class="text-sm text-slate-600 mt-0.5">
+                                            {{ winner.position_name }}
+                                            <span v-if="winner.candidate_party" class="text-slate-400">· {{ winner.candidate_party }}</span>
+                                        </p>
+                                    </div>
+                                    <div class="flex-shrink-0 text-right">
+                                        <p class="text-lg font-bold text-emerald-700">{{ winner.votes }}</p>
+                                        <p class="text-xs text-slate-500">votes</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div v-else class="rounded-lg bg-slate-50 p-4 text-center text-sm text-slate-500">
+                            No election results available yet.
+                        </div>
+
+                        <div class="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <p class="text-sm text-slate-700">
+                                <strong>{{ selectedElection?.election_name }}</strong> has been successfully completed.
+                                All ballots have been scanned and results have been generated.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="border-t border-slate-100 bg-slate-50 px-6 py-4 flex gap-3">
+                        <button
+                            type="button"
+                            class="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                            @click="showCompletionPopup = false"
+                        >
+                            Dismiss
+                        </button>
+                        <Link
+                            href="/admin/reports"
+                            class="flex-1 inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+                        >
+                            View Full Report
+                        </Link>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
 
         <!-- ── Change Election Modal ──────────────────────────── -->
         <Teleport to="body">

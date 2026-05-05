@@ -28,7 +28,7 @@ class BallotLayoutController extends Controller
 
         if (! $targetElection) {
             $targetElection = Election::query()
-                ->where('status', 'active')
+                ->whereIn('status', ['pending', 'active'])
                 ->withCount('ballots')
                 ->orderByDesc('election_date')
                 ->first();
@@ -56,7 +56,7 @@ class BallotLayoutController extends Controller
                 $election = $electionQuery->find($requestedElectionId);
             } else {
                 $election = $electionQuery
-                    ->where('status', 'active')
+                    ->whereIn('status', ['pending', 'active'])
                     ->orderByDesc('election_date')
                     ->first();
             }
@@ -65,7 +65,11 @@ class BallotLayoutController extends Controller
                 return null;
             }
 
-            $targetCount = (int) $validated['print_count'];
+            // Interpret print_count as the number of NEW ballots to generate (append),
+            // not as an absolute target. This avoids accidentally overwriting or
+            // reusing existing ballot numbers when the user wants to add more.
+            $toGenerate = max(0, (int) $validated['print_count']);
+
             $existingCount = Ballot::query()
                 ->where('election_id', $election->id)
                 ->count();
@@ -73,8 +77,6 @@ class BallotLayoutController extends Controller
             $nextBallotNumber = (int) (Ballot::query()
                 ->where('election_id', $election->id)
                 ->max('ballot_number') ?? 0) + 1;
-
-            $toGenerate = max(0, $targetCount - $existingCount);
 
             for ($index = 0; $index < $toGenerate; $index++) {
                 Ballot::create([
@@ -85,8 +87,10 @@ class BallotLayoutController extends Controller
                 ]);
             }
 
+            // Update the election's printed quantity to reflect the new total
+            $newTotal = $existingCount + $toGenerate;
             $election->update([
-                'ballot_print_quantity' => $targetCount,
+                'ballot_print_quantity' => $newTotal,
             ]);
 
             return [
@@ -103,7 +107,7 @@ class BallotLayoutController extends Controller
         }
 
         return redirect()
-            ->route('admin.ballot-generator.print', [
+            ->route('admin.ballot-management.print', [
                 'election' => $result['election']->id,
                 'per_sheet' => $perSheet,
                 'scale_percent' => $scalePercent,
@@ -112,7 +116,7 @@ class BallotLayoutController extends Controller
                 'status',
                 $result['generated'] > 0
                     ? "Generated {$result['generated']} ballot(s)."
-                    : 'No new ballot records were generated. Existing ballot count already meets the target.'
+                    : 'No new ballot records were generated.'
             );
     }
 
@@ -143,6 +147,6 @@ class BallotLayoutController extends Controller
             ->orderBy('name')
             ->get();
 
-        return Inertia::render('Admin/BallotGenerator/Print', compact('election', 'ballots', 'positions', 'perSheet', 'scalePercent'));
+        return Inertia::render('Admin/BallotManagement/Print', compact('election', 'ballots', 'positions', 'perSheet', 'scalePercent'));
     }
 }

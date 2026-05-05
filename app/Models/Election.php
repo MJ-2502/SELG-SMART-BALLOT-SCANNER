@@ -23,12 +23,14 @@ class Election extends Model
         'facilitator_id',
         'ballot_print_quantity',
         'status',
+        'completed_at',
     ];
 
     protected function casts(): array
     {
         return [
             'election_date' => 'datetime',
+            'completed_at' => 'datetime',
             'ballot_print_quantity' => 'integer',
             'status' => 'string',
         ];

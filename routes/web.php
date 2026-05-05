@@ -7,6 +7,7 @@ use App\Http\Controllers\BallotLayoutController;
 use App\Http\Controllers\BallotManagementController;
 use App\Http\Controllers\ElectionController;
 use App\Http\Controllers\ElectionProgressController;
+use App\Http\Controllers\ElectionResultController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ReportController;
@@ -81,7 +82,7 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
 
     Route::get('/admin/ballot-generator', [BallotLayoutController::class, 'index'])->name('admin.ballot-generator.index');
     Route::post('/admin/ballot-generator/generate', [BallotLayoutController::class, 'generate'])->name('admin.ballot-generator.generate');
-    Route::get('/admin/ballot-generator/print', [BallotLayoutController::class, 'print'])->name('admin.ballot-generator.print');
+    Route::get('/admin/ballot-management/print', [BallotLayoutController::class, 'print'])->name('admin.ballot-management.print');
 
     Route::get('/admin/ballot-management', [BallotManagementController::class, 'index'])->name('admin.ballot-management.index');
     Route::delete('/admin/ballot-management/{ballot}', [BallotManagementController::class, 'destroy'])->name('admin.ballot-management.destroy');
@@ -89,6 +90,12 @@ Route::middleware(['auth', IsAdviser::class])->group(function () {
     Route::post('/admin/reports/generate', [ReportController::class, 'store'])->name('admin.reports.store');
     Route::get('/admin/reports/{report}', [ReportController::class, 'show'])->name('admin.reports.show');
     Route::patch('elections/{election}/facilitators', [ElectionController::class, 'assignFacilitators'])->name('elections.facilitators.assign');
+
+    // Election Results Routes
+    Route::get('/elections/{election}/results', [ElectionResultController::class, 'show'])->name('elections.results.show');
+    Route::get('/api/elections/{election}/status', [ElectionResultController::class, 'status'])->name('api.elections.status');
+    Route::get('/api/elections/{election}/winners', [ElectionResultController::class, 'winners'])->name('api.elections.winners');
+    Route::get('/api/elections/completed', [ElectionResultController::class, 'completedElections'])->name('api.elections.completed');
 });
 
 Route::middleware(['auth', IsFacilitator::class])->group(function () {

@@ -1,6 +1,6 @@
 <script setup>
-import { Head, usePage } from '@inertiajs/vue3';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { Head, router, usePage } from '@inertiajs/vue3';
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
 defineOptions({ layout: AdminLayout });
@@ -60,6 +60,9 @@ const submitState = ref('Waiting for a successful scan.');
 const pendingSubmission = ref(null);
 const scanInProgress = ref(false);
 const submitInProgress = ref(false);
+const completionNotice = ref(null);
+const completionPrimaryBtn = ref(null);
+let completionRedirectTimer = null;
 
 const previewImageSrc = ref('');
 const debugOverlaySrc = ref('');
@@ -100,6 +103,18 @@ const cameraActive = computed(() => !!cameraStream.value);
 // Ballot number is required before scanning
 const ballotNumberMissing = computed(() => !ballotNumber.value.trim());
 
+const expectedBallots = computed(() => (props.activeElection?.expected_ballots ?? null));
+const ballotNumberInt = computed(() => {
+    const n = parseInt(String(ballotNumber.value || '').trim(), 10);
+    return Number.isFinite(n) ? n : null;
+});
+const ballotNumberOutOfRange = computed(() => {
+    const exp = expectedBallots.value ?? 0;
+    const n = ballotNumberInt.value;
+    if (!exp || n === null) return false;
+    return n < 1 || n > exp;
+});
+
 // Positions that have no detected vote (used to block submit)
 const undervotedPositions = computed(() => {
     if (!pendingSubmission.value) return [];
@@ -112,8 +127,18 @@ const undervotedPositions = computed(() => {
 const canSubmitBallot = computed(() =>
     scanPhase.value === 'validating' &&
     pendingSubmission.value !== null &&
-    undervotedPositions.value.length === 0
+    undervotedPositions.value.length === 0 &&
+    !ballotNumberOutOfRange.value
 );
+
+const nextBallotPreview = computed(() => {
+    const current = parseInt(lastSubmittedBallot.value?.ballot_number ?? ballotNumber.value, 10);
+    if (!Number.isFinite(current)) return '—';
+
+    const maxBallots = Number.isFinite(Number(expectedBallots.value)) ? Number(expectedBallots.value) : null;
+    if (maxBallots && current >= maxBallots) return String(maxBallots);
+    return String(current + 1);
+});
 
 const cameraStream = ref(null);
 let capturedBlob = null;
@@ -286,6 +311,10 @@ const processScan = async (base64Image) => {
     }
     if (!ballotNumber.value) {
         alert("Please enter the Printed Ballot Number before scanning.");
+        return;
+    }
+    if (ballotNumberOutOfRange.value) {
+        alert("The ballot number entered is outside the expected range for this election.");
         return;
     }
 
@@ -748,6 +777,10 @@ const startCamera = async () => {
         scanState.value = 'Enter the ballot number before starting the camera.';
         return;
     }
+    if (ballotNumberOutOfRange.value) {
+        scanState.value = 'Ballot number is out of range for this election.';
+        return;
+    }
     try {
         cameraStream.value = await navigator.mediaDevices.getUserMedia({
             video: {
@@ -937,6 +970,16 @@ const submitDetectedVotes = async () => {
             };
             if (Array.isArray(payload.submitted_votes)) renderVoteList(payload.submitted_votes);
             pendingSubmission.value = null;
+
+            const electionStatus = String(payload.election_status?.status ?? '').toLowerCase();
+            const electionClosed = payload.election_completed === true || electionStatus === 'completed' || electionStatus === 'closed';
+
+            if (electionClosed) {
+                scanPhase.value = 'completed';
+                showCompletionNotice(electionStatus === 'closed' ? 'Election Closed' : 'Election Completed');
+                return;
+            }
+
             scanPhase.value = 'submitted';
         } else {
             // Map known error codes to human-readable messages
@@ -958,10 +1001,14 @@ const submitDetectedVotes = async () => {
 
 // Reset everything and re-arm camera for the next ballot
 const scanNextBallot = () => {
-    // Auto-increment: parse current ballot number as int and add 1
-    // Falls back to empty string if it wasn't a number
+    // Auto-increment but do not go past the election's expected ballot count
     const current = parseInt(lastSubmittedBallot.value?.ballot_number ?? ballotNumber.value, 10);
-    const next = Number.isFinite(current) ? String(current + 1) : '';
+    const maxBallots = Number.isFinite(Number(expectedBallots.value)) ? Number(expectedBallots.value) : null;
+    let next = Number.isFinite(current) ? String(current + 1) : '';
+
+    if (maxBallots && Number.isFinite(current) && current >= maxBallots) {
+        next = String(maxBallots);
+    }
 
     scanPhase.value = 'idle';
     pendingSubmission.value = null;
@@ -1000,6 +1047,42 @@ const rescanBallot = () => {
     if (fileInput.value) fileInput.value.value = '';
     if (cameraStream.value) startAlignmentWatcher();
 };
+
+const clearCompletionRedirectTimer = () => {
+    if (completionRedirectTimer) {
+        clearTimeout(completionRedirectTimer);
+        completionRedirectTimer = null;
+    }
+};
+
+const finishScanAndReturnToDashboard = () => {
+    clearCompletionRedirectTimer();
+    stopCamera();
+    router.visit('/dashboard');
+};
+
+const showCompletionNotice = (title = 'Election Complete') => {
+    clearCompletionRedirectTimer();
+    completionNotice.value = {
+        title,
+        message: title === 'Election Closed'
+            ? 'The election has been closed. The scanner will return you to your facilitator dashboard.'
+            : 'All ballots have been scanned and results were created automatically. You can view the results on the Adviser dashboard.',
+    };
+
+    stopCamera();
+    completionRedirectTimer = window.setTimeout(() => {
+        router.visit('/dashboard');
+    }, 2500);
+};
+
+// Focus the primary action when the completion notice appears (accessibility)
+watch(completionNotice, async (val) => {
+    if (val) {
+        await nextTick();
+        completionPrimaryBtn.value?.focus?.();
+    }
+});
 
 const guideFrameClass = computed(() => {
     if (guideVisualState.value === 'ready') return 'border-emerald-300/95';
@@ -1047,6 +1130,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+    clearCompletionRedirectTimer();
     stopCamera();
     clearObjectUrl('preview');
     clearObjectUrl('debug');
@@ -1099,6 +1183,9 @@ onBeforeUnmount(() => {
                         :class="ballotNumber.trim() ? 'border-emerald-400 bg-emerald-50/40' : ''"
                     />
                 </label>
+                <div v-if="ballotNumberOutOfRange" class="mt-2 text-sm text-red-600">
+                    Ballot number must be between 1 and {{ props.activeElection?.expected_ballots ?? 'N' }}.
+                </div>
                 
             </div>
         </div>
@@ -1142,8 +1229,8 @@ onBeforeUnmount(() => {
                         </button>
                         <button v-if="!cameraActive" type="button" id="startCameraBtn"
                             class="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white active:bg-indigo-700 disabled:opacity-50"
-                            :disabled="ballotNumberMissing"
-                            :title="ballotNumberMissing ? 'Enter ballot number first' : ''"
+                            :disabled="ballotNumberMissing || ballotNumberOutOfRange"
+                            :title="ballotNumberMissing ? 'Enter ballot number first' : (ballotNumberOutOfRange ? 'Ballot number out of range' : '')"
                             @click="startCamera">
                             Start Camera
                         </button>
@@ -1193,7 +1280,7 @@ onBeforeUnmount(() => {
                         v-if="!cameraActive"
                         type="button"
                         class="absolute inset-0 flex flex-col items-center justify-center gap-3 w-full bg-slate-900/50 transition-colors active:bg-slate-900/70"
-                        :disabled="ballotNumberMissing"
+                        :disabled="ballotNumberMissing || ballotNumberOutOfRange"
                         @click="startCamera">
                         <div class="flex flex-col items-center gap-2"
                             :class="ballotNumberMissing ? 'opacity-40' : 'opacity-100'">
@@ -1257,7 +1344,7 @@ onBeforeUnmount(() => {
                                 maxlength="12"
                             />
                         </div>
-                        <button type="button" id="fsShutterBtn" @click="captureManual" :disabled="!cameraActive || ballotNumberMissing">
+                        <button type="button" id="fsShutterBtn" @click="captureManual" :disabled="!cameraActive || ballotNumberMissing || ballotNumberOutOfRange">
                             <span id="fsShutterInner"></span>
                         </button>
                         <button type="button" class="fs-side-btn" title="Preview"
@@ -1288,7 +1375,7 @@ onBeforeUnmount(() => {
             <button type="button"
                 class="w-full flex items-center justify-center gap-2.5 rounded-2xl py-4 text-base font-bold text-white shadow-sm transition-colors disabled:opacity-50"
                 :class="scanInProgress ? 'bg-emerald-700' : 'bg-emerald-600 active:bg-emerald-700'"
-                :disabled="scanInProgress || ballotNumberMissing"
+                :disabled="scanInProgress || ballotNumberMissing || ballotNumberOutOfRange"
                 @click="runScan">
                 <i v-if="scanInProgress" class="bi bi-arrow-repeat text-xl animate-spin leading-none" aria-hidden="true"></i>
                 <i v-else class="bi bi-upc-scan text-xl leading-none" aria-hidden="true"></i>
@@ -1530,7 +1617,7 @@ onBeforeUnmount(() => {
         <!-- ════════════════════════════════════════════════════════════
              SUCCESS MODAL — shown after a ballot is submitted
              ════════════════════════════════════════════════════════════ -->
-        <div v-if="scanPhase === 'submitted' && lastSubmittedBallot"
+        <div v-if="scanPhase === 'submitted' && lastSubmittedBallot && !completionNotice"
             class="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-0 sm:p-4"
             role="dialog" aria-modal="true">
 
@@ -1576,9 +1663,7 @@ onBeforeUnmount(() => {
                         <div>
                             <p class="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Next ballot</p>
                             <p class="text-sm font-bold text-indigo-900 mt-0.5">
-                                #{{ Number.isFinite(parseInt(lastSubmittedBallot?.ballot_number, 10))
-                                    ? parseInt(lastSubmittedBallot.ballot_number, 10) + 1
-                                    : '—' }}
+                                #{{ nextBallotPreview }}
                                 <span class="text-xs font-normal text-indigo-400 ml-1">(auto-filled)</span>
                             </p>
                         </div>
@@ -1589,6 +1674,58 @@ onBeforeUnmount(() => {
                         @click="scanNextBallot">
                         <i class="bi bi-upc-scan text-base leading-none" aria-hidden="true"></i>
                         Scan Next Ballot
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ════════════════════════════════════════════════════════════
+             COMPLETION MODAL — shown when the election is completed/closed
+             ════════════════════════════════════════════════════════════ -->
+        <div v-if="completionNotice"
+            class="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4"
+            role="dialog" aria-modal="true" aria-labelledby="completionModalTitle">
+
+            <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-md"></div>
+
+            <!-- Mobile bottom-sheet on small screens, centered card on larger -->
+            <div class="relative w-full max-w-md overflow-hidden rounded-t-3xl sm:rounded-3xl border border-emerald-200 bg-white shadow-2xl">
+                <div class="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-6 text-center">
+                    <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/20">
+                        <i class="bi bi-check2-circle text-3xl text-white leading-none" aria-hidden="true"></i>
+                    </div>
+                    <h2 id="completionModalTitle" class="text-lg sm:text-2xl font-bold tracking-tight text-white">{{ completionNotice.title }}</h2>
+                    <p class="mt-2 text-sm leading-6 text-emerald-50" aria-live="polite">{{ completionNotice.message }}</p>
+                </div>
+
+                <div class="px-6 py-5 space-y-4">
+                    <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <p class="font-semibold text-slate-900">What happens next</p>
+                        <p class="mt-1">The scanner will close and your facilitator dashboard will open so you can review results.</p>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <div class="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-200">
+                            <div class="h-full w-full animate-pulse rounded-full bg-emerald-500"></div>
+                        </div>
+                        <span class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Redirecting</span>
+                    </div>
+                </div>
+
+                <div class="px-6 pb-6 space-y-3">
+                    <button
+                        ref="completionPrimaryBtn"
+                        type="button"
+                        class="w-full rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
+                        @click="finishScanAndReturnToDashboard">
+                        Return to Dashboard Now
+                    </button>
+
+                    <button
+                        type="button"
+                        class="w-full rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm"
+                        @click="() => { completionNotice.value = null; startCamera(); }">
+                        Stay on Scanner
                     </button>
                 </div>
             </div>
