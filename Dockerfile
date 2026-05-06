@@ -21,7 +21,10 @@ WORKDIR /var/www/html
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libpq-dev \
     && docker-php-ext-install pdo pdo_mysql pdo_pgsql \
-    && a2dismod mpm_event mpm_worker \
+    && a2dismod mpm_event mpm_worker mpm_prefork \
+    && rm -f /etc/apache2/mods-enabled/mpm_event.* \
+       /etc/apache2/mods-enabled/mpm_worker.* \
+       /etc/apache2/mods-enabled/mpm_prefork.* \
     && a2enmod mpm_prefork rewrite \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=composer_deps /app /var/www/html
