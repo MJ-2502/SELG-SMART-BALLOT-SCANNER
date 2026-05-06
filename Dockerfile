@@ -21,7 +21,8 @@ WORKDIR /var/www/html
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libpq-dev \
     && docker-php-ext-install pdo pdo_mysql pdo_pgsql \
-    && a2enmod rewrite \
+    && a2dismod mpm_event mpm_worker \
+    && a2enmod mpm_prefork rewrite \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=composer_deps /app /var/www/html
 COPY --from=frontend /app/public/build /var/www/html/public/build
