@@ -16,19 +16,15 @@ RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --opt
 COPY . .
 RUN composer dump-autoload --optimize
 
-FROM php:8.2-apache
+FROM php:8.2-fpm
 WORKDIR /var/www/html
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq-dev \
+    && apt-get install -y --no-install-recommends libpq-dev nginx gettext-base \
     && docker-php-ext-install pdo pdo_mysql pdo_pgsql \
-    && a2dismod mpm_event mpm_worker mpm_prefork \
-    && rm -f /etc/apache2/mods-enabled/mpm_event.* \
-       /etc/apache2/mods-enabled/mpm_worker.* \
-       /etc/apache2/mods-enabled/mpm_prefork.* \
-    && a2enmod mpm_prefork rewrite \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=composer_deps /app /var/www/html
 COPY --from=frontend /app/public/build /var/www/html/public/build
-RUN chown -R www-data:www-data storage bootstrap/cache \
-    && sed -i 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/000-default.conf
+COPY docker/nginx.conf.template /etc/nginx/conf.d/default.conf.template
+RUN chown -R www-data:www-data storage bootstrap/cache
 EXPOSE 80
+CMD ["sh", "-c", "export PORT=${PORT:-8080}; envsubst '$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf; php-fpm -D; nginx -g 'daemon off;'"]
