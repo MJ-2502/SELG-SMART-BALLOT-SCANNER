@@ -25,6 +25,8 @@ RUN apt-get update \
 COPY --from=composer_deps /app /var/www/html
 COPY --from=frontend /app/public/build /var/www/html/public/build
 COPY docker/nginx.conf.template /etc/nginx/conf.d/default.conf.template
-RUN chown -R www-data:www-data storage bootstrap/cache
+RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
 EXPOSE 80
 CMD ["sh", "-c", "export PORT=${PORT:-8080}; envsubst '$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf; php-fpm -D; nginx -g 'daemon off;'"]
