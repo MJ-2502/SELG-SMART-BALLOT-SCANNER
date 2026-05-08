@@ -260,7 +260,6 @@ onUnmounted(() => document.removeEventListener('mousedown', handleOutsideClick))
                 <table class="ui-table w-full">
                     <thead>
                         <tr class="ui-row">
-                            <th class="ui-th w-14 text-slate-400 font-normal text-xs">ID</th>
                             <th class="ui-th">Name</th>
                             <th class="ui-th">Position</th>
                             <th class="ui-th w-28">Status</th>
@@ -270,11 +269,10 @@ onUnmounted(() => document.removeEventListener('mousedown', handleOutsideClick))
                     <tbody>
                         <!-- Empty state per party (edge case) -->
                         <tr v-if="group.candidates.length === 0">
-                            <td colspan="5" class="ui-td text-center text-sm text-slate-400 py-6">No candidates in this partylist yet.</td>
+                            <td colspan="4" class="ui-td text-center text-sm text-slate-400 py-6">No candidates in this partylist yet.</td>
                         </tr>
 
                         <tr v-for="candidate in group.candidates" :key="candidate.id" class="ui-row group/row hover:bg-slate-50 transition-colors">
-                            <td class="ui-td text-xs text-slate-400 tabular-nums">{{ candidate.id }}</td>
                             <td class="ui-td font-medium text-slate-800">{{ candidate.name }}</td>
                             <td class="ui-td text-slate-600">{{ candidate.position?.name }}</td>
 

@@ -47,7 +47,6 @@ const confirmDelete = () => window.confirm('Delete this position? This action ca
                 <table class="ui-table w-full">
                     <thead>
                         <tr class="ui-row">
-                            <th class="ui-th w-14 text-slate-400 font-normal text-xs">ID</th>
                             <th class="ui-th">Name</th>
                             <th class="ui-th w-28">Order</th>
                             <th class="ui-th w-36">Votes Allowed</th>
@@ -57,7 +56,7 @@ const confirmDelete = () => window.confirm('Delete this position? This action ca
                     <tbody>
                         <!-- Empty state -->
                         <tr v-if="positions.length === 0">
-                            <td colspan="5" class="py-12 text-center">
+                            <td colspan="4" class="py-12 text-center">
                                 <svg class="mx-auto h-10 w-10 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h3.75M3.75 3h16.5A.75.75 0 0121 3.75v16.5a.75.75 0 01-.75.75H3.75A.75.75 0 013 20.25V3.75A.75.75 0 013.75 3z"/></svg>
                                 <p class="text-sm font-medium text-slate-600 mb-1">No positions yet</p>
                                 <p class="text-xs text-slate-400">Add a position to define what candidates can run for.</p>
@@ -69,9 +68,6 @@ const confirmDelete = () => window.confirm('Delete this position? This action ca
                             :key="position.id"
                             class="ui-row hover:bg-slate-50 transition-colors"
                         >
-                            <!-- ID: de-emphasised -->
-                            <td class="ui-td text-xs text-slate-400 tabular-nums">{{ position.id }}</td>
-
                             <!-- Name: primary content -->
                             <td class="ui-td font-medium text-slate-800">{{ position.name }}</td>
 

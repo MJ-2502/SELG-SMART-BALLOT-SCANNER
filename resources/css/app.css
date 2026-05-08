@@ -30,11 +30,11 @@
 
 @layer components {
 	.ui-page {
-		@apply max-w-7xl mx-auto p-6;
+		@apply w-full max-w-7xl p-6;
 	}
 
 	.ui-page-narrow {
-		@apply max-w-3xl mx-auto p-6;
+		@apply w-full max-w-3xl p-6;
 	}
 
 	.ui-card {
@@ -99,7 +99,7 @@
 	}
 
 	.ui-table {
-		@apply w-full border-collapse;
+		@apply w-full border-collapse table-fixed;
 	}
 
 	.ui-th {

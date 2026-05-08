@@ -69,7 +69,7 @@ function toggleSidebar() {
             <aside class="absolute left-0 top-0 flex h-full w-72 flex-col bg-slate-50 text-slate-800 shadow-2xl">
                 <div class="flex h-16 items-center justify-between border-b border-slate-200 px-5">
                     <div class="flex items-center gap-3">
-                            <img :src="logoUrl" alt="SELG Ballot Scanner" class="h-9 w-9 rounded-full object-contain shadow-sm" />
+                        <img :src="logoUrl" alt="SELG Ballot Scanner" class="h-9 w-9 rounded-full object-contain shadow-sm" />
                         <div>
                             <div class="text-sm font-semibold leading-4 text-slate-900">SELG Ballot Scanner</div>
                             <div class="text-xs text-slate-500">Navigation</div>
@@ -140,7 +140,12 @@ function toggleSidebar() {
         </aside>
 
         <header class="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-            <div class="flex min-h-14 sm:min-h-16 md:min-h-[72px] items-center justify-between gap-2 sm:gap-3 md:gap-4 px-3 py-2 sm:px-4 sm:py-3 md:px-6 lg:px-8">
+            <div
+                :class="[
+                    'flex min-h-14 sm:min-h-16 md:min-h-[72px] items-center justify-between gap-2 sm:gap-3 md:gap-4 px-3 py-2 sm:px-4 sm:py-3 md:px-6 lg:px-8',
+                    sidebarCollapsed ? 'md:pl-24' : 'md:pl-[16rem]'
+                ]"
+            >
                 <div class="flex items-center gap-2 sm:gap-3 min-w-0">
                     <button @click="sidebarOpen = true" class="inline-flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-100 md:hidden shrink-0">
                         <i class="bi bi-list text-base sm:text-lg leading-none" aria-hidden="true"></i>
@@ -180,8 +185,14 @@ function toggleSidebar() {
             </div>
         </header>
 
-        <div class="transition-[padding] duration-300 ease-out" :class="sidebarCollapsed ? 'md:pl-24' : 'md:pl-[17.5rem]'">
-            <main class="py-8">
+        <div
+            class="transition-[padding] duration-300 ease-out"
+            :class="[
+                sidebarCollapsed ? 'md:pl-24' : 'md:pl-[17rem]',
+                'md:min-h-[calc(100vh-4.5rem)]',
+            ]"
+        >
+            <main class="md:min-h-[calc(100vh-4.5rem)]">
                 <slot />
             </main>
         </div>
