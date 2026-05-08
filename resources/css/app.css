@@ -30,11 +30,11 @@
 
 @layer components {
 	.ui-page {
-		@apply w-full max-w-7xl p-6;
+		@apply max-w-7xl mx-auto p-6;
 	}
 
 	.ui-page-narrow {
-		@apply w-full max-w-3xl p-6;
+		@apply max-w-3xl mx-auto p-6;
 	}
 
 	.ui-card {

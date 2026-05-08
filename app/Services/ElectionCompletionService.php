@@ -110,28 +110,32 @@ class ElectionCompletionService
         foreach ($positionTallies as $positionTally) {
             $positionId = $positionTally['position_id'];
             $positionName = $positionTally['position_name'];
-            $votesAllowed = $positionTally['votes_allowed'];
+            $votesAllowed = max(1, (int) ($positionTally['votes_allowed'] ?? 1));
             $candidates = collect($positionTally['candidates'] ?? []);
 
-            // Sort by votes descending and get top winners
-            $topCandidates = $candidates
+            $sortedCandidates = $candidates
                 ->sortByDesc('votes')
-                ->take($votesAllowed)
                 ->values();
 
-            // Check for ties at the winning threshold
-            $hasTie = false;
-            if ($topCandidates->count() > 0) {
-                $lastWinnerVotes = $topCandidates->last()['votes'];
-                $nextCandidate = $candidates
-                    ->sortByDesc('votes')
-                    ->skip($votesAllowed)
-                    ->first();
-
-                if ($nextCandidate && $nextCandidate['votes'] === $lastWinnerVotes) {
-                    $hasTie = true;
-                }
+            $cutoffVotes = null;
+            if ($sortedCandidates->count() >= $votesAllowed) {
+                $cutoffVotes = $sortedCandidates[$votesAllowed - 1]['votes'];
             }
+
+            $aboveCutoff = $cutoffVotes === null
+                ? $sortedCandidates
+                : $sortedCandidates->filter(fn ($candidate) => $candidate['votes'] > $cutoffVotes)->values();
+
+            $atCutoff = $cutoffVotes === null
+                ? collect()
+                : $sortedCandidates->filter(fn ($candidate) => $candidate['votes'] === $cutoffVotes)->values();
+
+            $seatsRemaining = max(0, $votesAllowed - $aboveCutoff->count());
+            $hasTie = $cutoffVotes !== null && $atCutoff->count() > $seatsRemaining;
+
+            $topCandidates = $hasTie
+                ? $aboveCutoff
+                : $sortedCandidates->take($votesAllowed)->values();
 
             $winners[] = [
                 'position_id' => $positionId,
@@ -145,7 +149,17 @@ class ElectionCompletionService
                     'color_code' => $candidate['color_code'] ?? null,
                 ])->values()->all(),
                 'has_tie' => $hasTie,
-                'tied_vote_count' => $hasTie ? $topCandidates->last()['votes'] : null,
+                'tied_vote_count' => $hasTie ? $cutoffVotes : null,
+                'seats_remaining' => $hasTie ? $seatsRemaining : 0,
+                'tied_candidates' => $hasTie
+                    ? $atCutoff->map(fn ($candidate) => [
+                        'id' => $candidate['id'],
+                        'name' => $candidate['name'],
+                        'party' => $candidate['party'],
+                        'votes' => (int) $candidate['votes'],
+                        'color_code' => $candidate['color_code'] ?? null,
+                    ])->values()->all()
+                    : [],
             ];
         }
 

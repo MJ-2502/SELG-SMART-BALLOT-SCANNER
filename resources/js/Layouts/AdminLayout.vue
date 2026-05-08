@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { Link, usePage } from '@inertiajs/vue3';
+import { Link, usePage, router } from '@inertiajs/vue3';
 
 const page = usePage();
 const sidebarOpen = ref(false);
@@ -23,6 +23,24 @@ const isAdviser = computed(() => Boolean(currentUser.value?.is_adviser));
 const canUseScanner = computed(() => currentUser.value?.role === 'facilitator');
 const dashboardHref = computed(() => (isAdviser.value ? '/admin' : '/dashboard'));
 const logoUrl = '/images/logo.png';
+
+const showLogoutModal = ref(false);
+const logoutForm = ref(null);
+function openLogoutModal(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    showLogoutModal.value = true;
+}
+function closeLogoutModal() {
+    showLogoutModal.value = false;
+}
+function doLogout() {
+    // submit a standard form POST so server can redirect normally (avoid Inertia JSON responses)
+    if (logoutForm.value) {
+        logoutForm.value.submit();
+    } else {
+        router.post('/logout');
+    }
+}
 
 const navItems = computed(() => {
     const items = [
@@ -171,16 +189,14 @@ function toggleSidebar() {
                         <span class="hidden sm:inline">Profile</span>
                     </Link>
 
-                    <Link
-                        href="/logout"
-                        method="post"
-                        as="button"
+                    <button
                         type="button"
                         class="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold text-slate-700 transition hover:bg-slate-50 shrink-0"
+                        @click="openLogoutModal"
                     >
                         <i class="bi bi-box-arrow-right text-sm leading-none" aria-hidden="true"></i>
                         <span class="hidden sm:inline">Logout</span>
-                    </Link>
+                    </button>
                 </div>
             </div>
         </header>
@@ -195,6 +211,25 @@ function toggleSidebar() {
             <main class="md:min-h-[calc(100vh-4.5rem)]">
                 <slot />
             </main>
+        </div>
+        <!-- Hidden logout form (non-Ajax) -->
+        <form ref="logoutForm" id="logout-form" action="/logout" method="POST" style="display:none;">
+            <input type="hidden" name="_token" :value="$page.props.csrf_token" />
+        </form>
+
+        <!-- Logout confirmation modal -->
+        <div v-if="showLogoutModal" class="fixed inset-0 z-50 flex items-center justify-center">
+            <div class="absolute inset-0 bg-slate-900/40" @click="closeLogoutModal"></div>
+            <div class="relative w-full max-w-md p-6">
+                <div class="ui-card">
+                    <h3 class="text-lg font-semibold text-slate-900">Confirm Logout</h3>
+                    <p class="text-sm text-slate-600 mt-2">Are you sure you want to log out of your account?</p>
+                    <div class="mt-4 flex justify-end gap-2">
+                        <button type="button" class="ui-btn-secondary ui-btn-sm" @click="closeLogoutModal">Cancel</button>
+                        <button type="button" class="ui-btn-danger ui-btn-sm" @click="doLogout">Logout</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </template>

@@ -7,6 +7,7 @@ use App\Models\Report;
 use App\Services\ElectionTallyService;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -105,6 +106,93 @@ class ReportController extends Controller
         return Inertia::render('Admin/Reports/Print', [
             'report' => $report,
             'reportData' => $reportData,
+        ]);
+    }
+
+    public function resolveTie(Request $request, Report $report): JsonResponse
+    {
+        abort_if(!auth()->user()?->isAdviser(), 403, 'Adviser access only.');
+
+        $validated = $request->validate([
+            'position_id' => ['required', 'integer'],
+            'winner_ids' => ['required', 'array', 'min:1'],
+            'winner_ids.*' => ['integer'],
+            'note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $reportData = is_array($report->report_data)
+            ? $report->report_data
+            : (json_decode((string) $report->report_data, true) ?: []);
+
+        $winners = collect($reportData['winners'] ?? []);
+        $positionIndex = $winners->search(fn ($position) => (int) ($position['position_id'] ?? 0) === (int) $validated['position_id']);
+
+        if ($positionIndex === false) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Position not found in report winners list.',
+            ], 404);
+        }
+
+        $position = $winners[$positionIndex];
+        if (empty($position['has_tie'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This position has no unresolved tie.',
+            ], 422);
+        }
+
+        $seatsRemaining = (int) ($position['seats_remaining'] ?? $position['votes_allowed'] ?? 1);
+        $winnerIds = array_values(array_unique(array_map('intval', $validated['winner_ids'])));
+
+        if (count($winnerIds) !== $seatsRemaining) {
+            return response()->json([
+                'success' => false,
+                'message' => "Select exactly {$seatsRemaining} winner(s) to resolve this tie.",
+            ], 422);
+        }
+
+        $tiedCandidates = collect($position['tied_candidates'] ?? []);
+        $tiedIds = $tiedCandidates->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $invalidSelections = array_diff($winnerIds, $tiedIds);
+
+        if (!empty($invalidSelections)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'One or more selected candidates are not part of the tied group.',
+            ], 422);
+        }
+
+        $resolvedWinners = $tiedCandidates
+            ->filter(fn ($candidate) => in_array((int) $candidate['id'], $winnerIds, true))
+            ->values();
+
+        $existingWinners = collect($position['winners'] ?? []);
+        $position['winners'] = $existingWinners->merge($resolvedWinners)->values()->all();
+        $position['has_tie'] = false;
+        $position['seats_remaining'] = 0;
+        $position['tied_candidates'] = [];
+        $position['tie_resolution'] = [
+            'resolved_at' => now()->toDateTimeString(),
+            'resolved_by' => [
+                'id' => auth()->id(),
+                'name' => auth()->user()?->name,
+            ],
+            'note' => $validated['note'] ?? null,
+            'selected_winner_ids' => $winnerIds,
+            'tied_vote_count' => $position['tied_vote_count'] ?? null,
+            'tied_candidates' => $tiedCandidates->values()->all(),
+        ];
+
+        $winners[$positionIndex] = $position;
+        $reportData['winners'] = $winners->values()->all();
+        $report->update(['report_data' => $reportData]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'winners' => $reportData['winners'] ?? [],
+            ],
         ]);
     }
 }
