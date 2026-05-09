@@ -99,37 +99,46 @@ class CandidateController extends Controller
         $party = trim((string) $request->input('party'));
         $colorCode = strtoupper((string) $request->input('color_code'));
         $isActive = (bool) $request->boolean('is_active', true);
-        $entries = collect($request->input('entries', []))
-            ->map(fn ($name) => trim((string) $name))
-            ->filter(fn ($name) => $name !== '');
+        
+        $entries = $request->input('entries', []);
 
         $result = DB::transaction(function () use ($entries, $party, $isActive, $colorCode) {
             $created = 0;
             $updated = 0;
 
-            foreach ($entries as $positionId => $candidateName) {
-                $candidate = Candidate::updateOrCreate(
-                    [
-                        'position_id' => (int) $positionId,
-                        'name' => $candidateName,
-                    ],
-                    [
-                        'party' => $party,
-                        'color_code' => $colorCode,
-                        'is_active' => $isActive,
-                    ],
-                );
+            // $entries is now an array of arrays: [positionId => ['name1', 'name2']]
+            foreach ($entries as $positionId => $candidateNames) {
+                
+                // Loop through the array of names for this specific position
+                foreach ((array) $candidateNames as $candidateName) {
+                    
+                    if (trim((string) $candidateName) === '') {
+                        continue; // Skip empty text boxes
+                    }
 
-                if ($candidate->wasRecentlyCreated) {
-                    $created++;
-                } else {
-                    $updated++;
+                    $candidate = Candidate::updateOrCreate(
+                        [
+                            'position_id' => (int) $positionId,
+                            'name' => $candidateName,
+                        ],
+                        [
+                            'party' => $party,
+                            'color_code' => $colorCode,
+                            'is_active' => $isActive,
+                        ]
+                    );
+
+                    if ($candidate->wasRecentlyCreated) {
+                        $created++;
+                    } else {
+                        $updated++;
+                    }
                 }
             }
 
             return ['created' => $created, 'updated' => $updated];
         });
-
+        
         return redirect()
             ->route('candidates.index')
             ->with('status', "Partylist saved. Created: {$result['created']}, Updated: {$result['updated']}.");

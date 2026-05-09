@@ -13,6 +13,22 @@ class UpdateCandidateRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $party = trim((string) $this->input('party', ''));
+        $colorCode = strtoupper(trim((string) $this->input('color_code', '')));
+        $name = ucwords(trim((string) $this->input('name', '')));
+
+        $this->merge([
+            'name' => $name !== '' ? $name : null,
+            
+            // Standardize partylist casing to UPPERCASE to prevent duplicate groups
+            'party' => $party !== '' ? strtoupper($party) : null, 
+            
+            'color_code' => $colorCode,
+        ]);
+    }
+
     public function rules(): array
     {
         $normalizedParty = $this->normalizedParty();
@@ -21,7 +37,14 @@ class UpdateCandidateRequest extends FormRequest
 
         return [
             'position_id' => ['required', 'exists:positions,id'],
-            'name' => ['required', 'string', 'max:255'],
+            'name' => [
+                'required', 
+                'string', 
+                'max:255',
+                Rule::unique('candidates')->where(function ($query) {
+                    return $query->where('position_id', $this->position_id);
+                })->ignore($ignoreCandidateId) // Bypasses the strict check for the current record
+            ],
             'party' => ['nullable', 'string', 'max:255'],
             'color_code' => [
                 'required',
@@ -39,15 +62,11 @@ class UpdateCandidateRequest extends FormRequest
         ];
     }
 
-    protected function prepareForValidation(): void
+    public function messages(): array
     {
-        $party = trim((string) $this->input('party', ''));
-        $colorCode = strtoupper(trim((string) $this->input('color_code', '')));
-
-        $this->merge([
-            'party' => $party !== '' ? $party : null,
-            'color_code' => $colorCode,
-        ]);
+        return [
+            'name.unique' => 'This exact candidate is already running for this position.',
+        ];
     }
 
     private function normalizedParty(): ?string

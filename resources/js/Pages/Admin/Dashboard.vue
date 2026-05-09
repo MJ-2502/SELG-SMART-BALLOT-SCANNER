@@ -320,7 +320,7 @@ const stopEchoListener = () => {
             <div class="pointer-events-none absolute -bottom-20 left-10 h-44 w-44 rounded-full bg-sky-300/30 blur-3xl"></div>
             <div class="relative max-w-3xl">
                 <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900 mb-2">Welcome to SELG Ballot Scanner</h1>
-                <p class="text-slate-600 mb-8">No election has been created yet. Start by creating your first election to unlock live monitoring and progress insights.</p>
+                <p class="text-slate-600 mb-8">No election has been created yet. Start by creating an election and adding candidates to unlock live monitoring and progress insights.</p>
                 <div class="rounded-2xl border border-indigo-100 bg-white/90 p-6 shadow-sm">
                     <h2 class="text-lg font-semibold text-slate-900 mb-2">Ready to begin?</h2>
                     <p class="text-sm text-slate-600 mb-5">Set up election details first, then ballot generation and scanner workflows will follow automatically.</p>
@@ -346,10 +346,7 @@ const stopEchoListener = () => {
                             <span class="h-1.5 w-1.5 rounded-full" :class="electionStatus.dotClass"></span>
                             {{ electionStatus.label }}
                         </span>
-                        <span class="text-sm text-slate-500">{{ formatDate(selectedElection?.election_date) }}</span>
-                        <span v-if="formatTime(selectedElection?.election_date)" class="text-xs text-slate-400">
-                            · {{ formatTime(selectedElection?.election_date) }}
-                        </span>
+                        <span class="text-sm text-slate-500">{{ selectedElection?.election_date_formatted ?? (formatDate(selectedElection?.election_date) + (formatTime(selectedElection?.election_date) ? (' · ' + formatTime(selectedElection?.election_date)) : '')) }}</span>
                     </div>
                 </div>
 

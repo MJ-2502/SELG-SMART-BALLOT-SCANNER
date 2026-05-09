@@ -23,7 +23,11 @@ const showError = ref(true);
 
 const partyGroups = computed(() => {
     const groups = props.candidates.reduce((acc, candidate) => {
-        const partyName = candidate.party && String(candidate.party).trim() !== '' ? candidate.party : 'Independent';
+        // Force the party name to UPPERCASE so Vue merges all case variations into one table
+        const partyName = candidate.party && String(candidate.party).trim() !== '' 
+            ? String(candidate.party).trim().toUpperCase() 
+            : 'Independent';
+            
         if (!acc[partyName]) acc[partyName] = [];
         acc[partyName].push(candidate);
         return acc;

@@ -13,13 +13,52 @@ class StoreCandidateRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $party = trim((string) $this->input('party', ''));
+        $colorCode = strtoupper(trim((string) $this->input('color_code', '')));
+        $name = ucwords(trim((string) $this->input('name', '')));
+
+        $this->merge([
+            'name' => $name !== '' ? $name : null,
+            
+            // Standardize partylist casing to UPPERCASE to prevent duplicate groups
+            'party' => $party !== '' ? strtoupper($party) : null, 
+            
+            'color_code' => $colorCode,
+        ]);
+    }
+
     public function rules(): array
     {
         $normalizedParty = $this->normalizedParty();
 
         return [
             'position_id' => ['required', 'exists:positions,id'],
-            'name' => ['required', 'string', 'max:255'],
+            
+            // Replaced the simple unique rule with a custom double-checker
+            'name' => [
+                'required', 
+                'string', 
+                'max:255',
+                function (string $attribute, mixed $value, \Closure $fail) {
+                    // Look for any existing candidate with this exact name
+                    $existingCandidate = Candidate::with('position')->where('name', $value)->first();
+                    
+                    if ($existingCandidate) {
+                        // Checker 1: Are they already in THIS position?
+                        if ($existingCandidate->position_id == $this->position_id) {
+                            $fail('This exact candidate is already running for this position.');
+                        } 
+                        // Checker 2: Are they running for ANOTHER position?
+                        else {
+                            $positionName = $existingCandidate->position ? $existingCandidate->position->name : 'another position';
+                            $fail("This candidate is already running for {$positionName}. A candidate cannot run for multiple positions.");
+                        }
+                    }
+                }
+            ],
+            
             'party' => ['nullable', 'string', 'max:255'],
             'color_code' => [
                 'required',
@@ -35,17 +74,6 @@ class StoreCandidateRequest extends FormRequest
             ],
             'is_active' => ['nullable', 'boolean'],
         ];
-    }
-
-    protected function prepareForValidation(): void
-    {
-        $party = trim((string) $this->input('party', ''));
-        $colorCode = strtoupper(trim((string) $this->input('color_code', '')));
-
-        $this->merge([
-            'party' => $party !== '' ? $party : null,
-            'color_code' => $colorCode,
-        ]);
     }
 
     private function normalizedParty(): ?string
@@ -99,10 +127,6 @@ class StoreCandidateRequest extends FormRequest
         }
 
         if ($conflictQuery->exists()) {
-            if ($normalizedParty === null) {
-                return 'This color is already assigned to another partylist or independent candidate.';
-            }
-
             return 'This color is already assigned to another partylist or independent candidate.';
         }
 

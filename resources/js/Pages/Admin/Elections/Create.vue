@@ -6,6 +6,16 @@ defineOptions({ layout: AdminLayout });
 
 const props = defineProps({ facilitators: Array });
 const form = useForm({ election_name: '', election_date: '', facilitator_ids: [] });
+
+const submitForm = () => {
+    // Convert datetime-local (browser local time) to UTC ISO string
+    if (form.election_date) {
+        const localDate = new Date(form.election_date);
+        // Convert to UTC by getting the ISO string
+        form.election_date = localDate.toISOString();
+    }
+    form.post('/elections');
+};
 </script>
 
 <template>
@@ -13,7 +23,7 @@ const form = useForm({ election_name: '', election_date: '', facilitator_ids: []
     <div class="ui-page-narrow">
         <div class="ui-card">
             <h1 class="text-xl font-semibold mb-6">Create Election</h1>
-            <form class="space-y-4" @submit.prevent="form.post('/elections')">
+            <form class="space-y-4" @submit.prevent="submitForm">
                 <div>
                     <label class="block text-sm font-medium mb-1">Election Name</label>
                     <input v-model="form.election_name" type="text" class="ui-input" />

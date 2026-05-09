@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
@@ -19,6 +19,12 @@ const form = useForm({
     color_code: '',
     is_active: true,
 });
+
+const existingParties = computed(() => {
+    if (!props.partyColorMap) return [];
+    return Object.keys(props.partyColorMap).map(key => key.toUpperCase());
+});
+
 
 const normalizedParty = computed(() => String(form.party ?? '').trim().toLowerCase());
 const existingPartyColor = computed(() => props.partyColorMap?.[normalizedParty.value] ?? null);
@@ -67,9 +73,19 @@ const selectColor = (color) => {
                     <input v-model="form.name" type="text" class="ui-input" required />
                     <p v-if="form.errors.name" class="text-sm text-red-600 mt-1">{{ form.errors.name }}</p>
                 </div>
+                
                 <div>
-                    <label class="block text-sm font-medium mb-1" for="party">Party</label>
-                    <input v-model="form.party" type="text" class="ui-input" />
+                    <div class="flex items-end justify-between mb-1">
+                        <label class="block text-sm font-medium" for="party">Party</label>
+                    </div>
+
+                    <select v-if="!isNewParty && existingParties.length > 0" v-model="form.party" class="ui-input">
+                        <option value="">Independent (No Party)</option>
+                        <option v-for="party in existingParties" :key="party" :value="party">{{ party }}</option>
+                    </select>
+
+                    <input v-else v-model="form.party" type="text" class="ui-input" placeholder="Enter party name (leave blank for Independent)" />
+                    
                     <p v-if="form.errors.party" class="text-sm text-red-600 mt-1">{{ form.errors.party }}</p>
                 </div>
 

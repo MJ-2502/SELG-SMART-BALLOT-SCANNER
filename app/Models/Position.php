@@ -14,6 +14,7 @@ class Position extends Model
         'name',
         'display_order',
         'votes_allowed',
+        'max_candidates_per_party',
     ];
 
     protected function casts(): array
@@ -21,6 +22,7 @@ class Position extends Model
         return [
             'display_order' => 'integer',
             'votes_allowed' => 'integer',
+            'max_candidates_per_party' => 'integer',
         ];
     }
 

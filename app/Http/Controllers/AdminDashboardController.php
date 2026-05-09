@@ -50,6 +50,9 @@ class AdminDashboardController extends Controller
             // Eager-load facilitators for display on the dashboard
             $selectedElection->load(['facilitators:id,name']);
 
+            // Provide a pre-formatted election date string for consistent display
+            $selectedElection->setAttribute('election_date_formatted', $selectedElection->election_date?->format('F j, Y g:i A'));
+
             $tallyData = $tallyService->buildElectionSummary($selectedElection);
             $stats['ballots_scanned'] = $tallyData['summary']['total_scanned'];
             $stats['valid_ballots'] = $tallyData['summary']['valid_submissions'];

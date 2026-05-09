@@ -21,27 +21,18 @@ class PositionController extends Controller
         return Inertia::render('Admin/Positions/Index', compact('positions'));
     }
 
-    public function create(): Response
-    {
-        return Inertia::render('Admin/Positions/Create');
-    }
-
     public function store(StorePositionRequest $request): RedirectResponse
     {
         Position::create([
             'name' => $request->input('name'),
             'display_order' => $request->integer('display_order', 0),
             'votes_allowed' => $request->integer('votes_allowed', 1),
+            'max_candidates_per_party' => $request->integer('max_candidates_per_party', 1),
         ]);
 
         return redirect()
             ->route('positions.index')
             ->with('status', 'Position created successfully.');
-    }
-
-    public function edit(Position $position): Response
-    {
-        return Inertia::render('Admin/Positions/Edit', compact('position'));
     }
 
     public function update(UpdatePositionRequest $request, Position $position): RedirectResponse
@@ -50,6 +41,7 @@ class PositionController extends Controller
             'name' => $request->input('name'),
             'display_order' => $request->integer('display_order', 0),
             'votes_allowed' => $request->integer('votes_allowed', 1),
+            'max_candidates_per_party' => $request->integer('max_candidates_per_party', 1),
         ]);
 
         return redirect()

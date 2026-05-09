@@ -13,6 +13,34 @@ class StorePartylistCandidatesRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $party = trim((string) $this->input('party', ''));
+        
+        // 1. Sanitize ALL candidate names in the array to Title Case
+        $entries = $this->input('entries', []);
+        if (is_array($entries)) {
+            foreach ($entries as $positionId => $value) {
+                // Support either a single name (string) or multiple names (array)
+                if (is_array($value)) {
+                    foreach ($value as $idx => $name) {
+                        $trimmed = trim((string) $name);
+                        $entries[$positionId][$idx] = $trimmed !== '' ? ucwords($trimmed) : '';
+                    }
+                } else {
+                    $trimmed = trim((string) $value);
+                    $entries[$positionId] = $trimmed !== '' ? ucwords($trimmed) : '';
+                }
+            }
+        }
+
+        $this->merge([
+            'party' => $party !== '' ? strtoupper($party) : null,
+            'color_code' => strtoupper(trim((string) $this->input('color_code', ''))),
+            'entries' => $entries, // Save the sanitized names back
+        ]);
+    }
+
     public function rules(): array
     {
         $normalizedParty = strtolower(trim((string) $this->input('party', '')));
@@ -32,28 +60,56 @@ class StorePartylistCandidatesRequest extends FormRequest
                 },
             ],
             'is_active' => ['nullable', 'boolean'],
+            
+            // --- THE CORRECTED RULES ---
             'entries' => ['required', 'array'],
-            'entries.*' => ['nullable', 'string', 'max:255'],
+            'entries.*' => ['required', 'array'], 
+            'entries.*.*' => ['nullable', 'string', 'max:255'], 
         ];
-    }
-
-    protected function prepareForValidation(): void
-    {
-        $this->merge([
-            'party' => trim((string) $this->input('party', '')),
-            'color_code' => strtoupper(trim((string) $this->input('color_code', ''))),
-        ]);
     }
 
     public function withValidator($validator): void
     {
         $validator->after(function ($validator) {
-            $entries = collect((array) $this->input('entries', []))
-                ->map(fn ($name) => trim((string) $name))
-                ->filter(fn ($name) => $name !== '');
+            $entriesData = $this->input('entries', []);
+            $flatNames = [];
+            
+            // Extract all names that were typed in
+            foreach ($entriesData as $positionId => $namesArray) {
+                foreach ((array) $namesArray as $name) {
+                    $trimmed = trim((string) $name);
+                    if ($trimmed !== '') {
+                        $flatNames[] = ['position_id' => $positionId, 'name' => $trimmed];
+                    }
+                }
+            }
 
-            if ($entries->isEmpty()) {
+            if (empty($flatNames)) {
                 $validator->errors()->add('entries', 'Add at least one candidate name for this partylist.');
+                return;
+            }
+
+            // Check if they typed the exact same name multiple times in the form
+            $justNames = array_column($flatNames, 'name');
+            $nameCounts = array_count_values($justNames);
+
+            // Run our strict double-checker on the database
+            foreach ($flatNames as $entry) {
+                if ($nameCounts[$entry['name']] > 1) {
+                    $validator->errors()->add("entries", "You entered '{$entry['name']}' multiple times in this form.");
+                    continue;
+                }
+
+                $existingCandidate = Candidate::with('position')->where('name', $entry['name'])->first();
+
+                if ($existingCandidate) {
+                    if ($existingCandidate->position_id == $entry['position_id']) {
+                        $validator->errors()->add("entries", "{$entry['name']} is already running for this position.");
+                    } else {
+                        $positionName = $existingCandidate->position ? $existingCandidate->position->name : 'another position';
+                        $validator->errors()->add("entries", "{$entry['name']} is already running for {$positionName}. A candidate cannot run for multiple positions.");
+                    }
+                }
             }
         });
     }
@@ -70,7 +126,6 @@ class StorePartylistCandidatesRequest extends FormRequest
 
         if ($partyColors->isNotEmpty() && !$partyColors->contains($colorCode)) {
             $partyLabel = trim((string) $this->input('party', 'this partylist'));
-
             return "Partylist \"{$partyLabel}\" already uses {$partyColors->first()}.";
         }
 
