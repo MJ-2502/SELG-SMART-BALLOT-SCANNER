@@ -12,13 +12,39 @@ const showError = ref(true);
 
 // Track which election's facilitator dropdown is open
 const openDropdownId = ref(null);
+const dropdownStyle = ref({}); // To track where the dropdown should appear
 
-const toggleDropdown = (electionId) => {
-    openDropdownId.value = openDropdownId.value === electionId ? null : electionId;
+const toggleDropdown = (electionId, event) => {
+    // If it's already open, close it
+    if (openDropdownId.value === electionId) {
+        openDropdownId.value = null;
+        return;
+    }
+
+    // Calculate position relative to the button that was clicked
+    const rect = event.currentTarget.getBoundingClientRect();
+    const dropdownWidth = 320; // 320px = tailwind w-80
+
+    // Determine the left position, preventing it from bleeding off the right edge of the screen
+    let leftPos = rect.left + window.scrollX;
+    if (rect.left + dropdownWidth > window.innerWidth) {
+        leftPos = window.innerWidth - dropdownWidth - 16; // 16px buffer
+    }
+
+    dropdownStyle.value = {
+        top: `${rect.bottom + window.scrollY + 8}px`, // 8px gap below the button
+        left: `${leftPos}px`,
+    };
+
+    openDropdownId.value = electionId;
 };
 
 const handleOutsideClick = (e) => {
-    if (openDropdownId.value && !e.target.closest('[data-facilitator-dropdown]')) {
+    if (openDropdownId.value) {
+        // Ignore clicks on the trigger button or inside the teleported panel itself
+        if (e.target.closest('[data-facilitator-trigger]')) return;
+        if (e.target.closest('[data-facilitator-panel]')) return;
+        
         openDropdownId.value = null;
     }
 };
@@ -34,7 +60,7 @@ const facilitatorLabel = (election) => {
     return election.facilitators.map((f) => f.name).join(', ');
 };
 
-// Confirmation dialogs — name the specific election so the user knows what they're doing
+// Confirmation dialogs
 const confirmStart = (name) =>
     window.confirm(`Start the election "${name}"?\n\nOnce started, ballot scanning will go live.`);
 
@@ -50,7 +76,6 @@ const confirmDelete = (name) =>
 
     <div class="ui-page">
 
-        <!-- Page Header -->
         <div class="ui-card mb-6">
             <div class="flex justify-between items-center">
                 <div>
@@ -61,7 +86,6 @@ const confirmDelete = (name) =>
             </div>
         </div>
 
-        <!-- Flash: success -->
         <div
             v-if="$page.props.flash.status && showStatus"
             class="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 mb-4"
@@ -74,7 +98,6 @@ const confirmDelete = (name) =>
             </button>
         </div>
 
-        <!-- Flash: error -->
         <div
             v-if="$page.props.flash.error && showError"
             class="flex items-start gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 mb-4"
@@ -87,10 +110,9 @@ const confirmDelete = (name) =>
             </button>
         </div>
 
-        <!-- Elections table -->
         <div class="ui-card overflow-hidden">
             <div class="overflow-x-auto -mx-4 sm:-mx-6 px-4 sm:px-6">
-                <table class="ui-table w-full">
+                <table class="ui-table w-full table-fixed">
                     <thead>
                         <tr class="ui-row">
                             <th class="ui-th">Election Name</th>
@@ -102,7 +124,6 @@ const confirmDelete = (name) =>
                         </tr>
                     </thead>
                     <tbody>
-                        <!-- Empty state -->
                         <tr v-if="elections.length === 0">
                             <td colspan="6" class="py-12 text-center">
                                 <svg class="mx-auto h-10 w-10 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 002.25 2.25h.75m0-3.75h3.75m0-3.75h-3.75"/></svg>
@@ -117,92 +138,91 @@ const confirmDelete = (name) =>
                             :key="election.id"
                             class="ui-row hover:bg-slate-50 transition-colors"
                         >
-                            <!-- Election name -->
-                            <td class="ui-td font-medium text-slate-800">{{ election.election_name }}</td>
-
-                            <!-- Date -->
-                            <td class="ui-td text-slate-600 tabular-nums">
-                                {{ election.election_date_formatted ?? election.election_date }}
+                            <td class="ui-td font-medium text-slate-800">
+                                <div class="max-w-[220px] truncate">{{ election.election_name }}</div>
                             </td>
 
-                            <!-- Facilitator + assign dropdown -->
+                            <td class="ui-td text-slate-600 tabular-nums">
+                                <div class="max-w-[160px] truncate">{{ election.election_date_formatted ?? election.election_date }}</div>
+                            </td>
+
                             <td class="ui-td">
-                                <!-- Assigned names or "unassigned" hint -->
                                 <p class="text-sm text-slate-700 mb-1.5">
-                                    <span v-if="facilitatorLabel(election)">{{ facilitatorLabel(election) }}</span>
+                                    <span v-if="facilitatorLabel(election)" class="max-w-[240px] block truncate">{{ facilitatorLabel(election) }}</span>
                                     <span v-else class="text-slate-400 italic text-xs">No facilitators assigned</span>
                                 </p>
 
-                                <!-- Assign dropdown trigger -->
-                                <div class="relative inline-block" data-facilitator-dropdown>
+                                <div>
                                     <button
                                         type="button"
+                                        data-facilitator-trigger
                                         class="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50 transition"
-                                        @click="toggleDropdown(election.id)"
+                                        @click="toggleDropdown(election.id, $event)"
                                     >
                                         <svg class="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
                                         Assign Facilitator
                                         <i class="bi bi-chevron-down text-xs leading-none"></i>
                                     </button>
 
-                                    <!-- Dropdown panel -->
-                                    <div
-                                        v-if="openDropdownId === election.id"
-                                        class="absolute left-0 top-full z-30 mt-2 w-80 max-w-[90vw] rounded-xl border border-slate-200 bg-white shadow-lg"
-                                    >
-                                        <form :action="`/elections/${election.id}/facilitators`" method="POST">
-                                            <input type="hidden" name="_token" :value="$page.props.csrf_token" />
-                                            <input type="hidden" name="_method" value="PATCH" />
+                                    <Teleport to="body">
+                                        <div
+                                            v-if="openDropdownId === election.id"
+                                            data-facilitator-panel
+                                            class="absolute z-50 w-80 max-w-[90vw] rounded-xl border border-slate-200 bg-white shadow-xl"
+                                            :style="dropdownStyle"
+                                        >
+                                            <form :action="`/elections/${election.id}/facilitators`" method="POST">
+                                                <input type="hidden" name="_token" :value="$page.props.csrf_token" />
+                                                <input type="hidden" name="_method" value="PATCH" />
 
-                                            <div class="max-h-64 overflow-y-auto">
-                                                <div v-if="facilitators.length === 0" class="px-4 py-6 text-center text-sm text-slate-500">
-                                                    No facilitators found.
-                                                    <Link href="/facilitators/create" class="block mt-1 text-indigo-600 font-semibold">Add one →</Link>
+                                                <div class="max-h-64 overflow-y-auto">
+                                                    <div v-if="facilitators.length === 0" class="px-4 py-6 text-center text-sm text-slate-500">
+                                                        No facilitators found.
+                                                        <Link href="/facilitators/create" class="block mt-1 text-indigo-600 font-semibold">Add one →</Link>
+                                                    </div>
+
+                                                    <label
+                                                        v-for="facilitator in facilitators"
+                                                        :key="facilitator.id"
+                                                        class="flex cursor-pointer items-center gap-3 border-b border-slate-100 px-4 py-2.5 transition hover:bg-indigo-50 last:border-b-0"
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            name="facilitator_ids[]"
+                                                            :value="facilitator.id"
+                                                            :checked="isAssigned(election, facilitator.id)"
+                                                            class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                                        />
+
+                                                        <span class="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
+                                                            {{ facilitator.name?.charAt(0)?.toUpperCase() ?? '?' }}
+                                                        </span>
+
+                                                        <span class="flex-1 min-w-0">
+                                                            <span class="block text-sm font-medium text-slate-900 truncate">{{ facilitator.name }}</span>
+                                                            <span class="block text-xs text-slate-500 font-mono">@{{ facilitator.username }} · Grade {{ facilitator.grade_level }}</span>
+                                                        </span>
+                                                    </label>
                                                 </div>
 
-                                                <label
-                                                    v-for="facilitator in facilitators"
-                                                    :key="facilitator.id"
-                                                    class="flex cursor-pointer items-center gap-3 border-b border-slate-100 px-4 py-2.5 transition hover:bg-indigo-50 last:border-b-0"
-                                                >
-                                                    <input
-                                                        type="checkbox"
-                                                        name="facilitator_ids[]"
-                                                        :value="facilitator.id"
-                                                        :checked="isAssigned(election, facilitator.id)"
-                                                        class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                                    />
-
-                                                    <!-- Avatar with initials -->
-                                                    <span class="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
-                                                        {{ facilitator.name?.charAt(0)?.toUpperCase() ?? '?' }}
-                                                    </span>
-
-                                                    <span class="flex-1 min-w-0">
-                                                        <span class="block text-sm font-medium text-slate-900 truncate">{{ facilitator.name }}</span>
-                                                        <span class="block text-xs text-slate-500 font-mono">@{{ facilitator.username }} · Grade {{ facilitator.grade_level }}</span>
-                                                    </span>
-                                                </label>
-                                            </div>
-
-                                            <div class="border-t border-slate-100 flex items-center justify-between bg-slate-50 px-4 py-2.5 rounded-b-xl">
-                                                <button
-                                                    type="button"
-                                                    class="text-xs text-slate-500 hover:text-slate-700"
-                                                    @click="openDropdownId = null"
-                                                >
-                                                    Cancel
-                                                </button>
-                                                <button type="submit" class="ui-btn-primary ui-btn-sm">
-                                                    Save assignments
-                                                </button>
-                                            </div>
-                                        </form>
-                                    </div>
+                                                <div class="border-t border-slate-100 flex items-center justify-between bg-slate-50 px-4 py-2.5 rounded-b-xl">
+                                                    <button
+                                                        type="button"
+                                                        class="text-xs text-slate-500 hover:text-slate-700"
+                                                        @click="openDropdownId = null"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                    <button type="submit" class="ui-btn-primary ui-btn-sm">
+                                                        Save assignments
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </Teleport>
                                 </div>
                             </td>
 
-                            <!-- Status badge -->
                             <td class="ui-td">
                                 <span
                                     v-if="election.status === 'active'"
@@ -227,7 +247,6 @@ const confirmDelete = (name) =>
                                 </span>
                             </td>
 
-                            <!-- Ballot count badge -->
                             <td class="ui-td">
                                 <span
                                     v-if="(election.ballots_count ?? 0) > 0"
@@ -239,14 +258,18 @@ const confirmDelete = (name) =>
                                 <span v-else class="text-xs text-slate-400 italic">No ballots yet</span>
                             </td>
 
-                            <!-- Actions
-                                 Start  → green  (constructive)
-                                 Stop   → amber  (caution — distinct from destructive delete)
-                                 Delete → red    (destructive)
-                            -->
-                            <td class="ui-td">
-                                <div class="flex gap-2">
-                                    <!-- Start: only when pending -->
+                            <td class="ui-td min-w-0">
+                                <div class="flex gap-2 flex-wrap items-center">
+                                    <Link
+                                        v-if="election.status === 'pending'"
+                                        :href="`/elections/${election.id}/edit`"
+                                        class="ui-btn-sm inline-flex flex-none items-center justify-center rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-slate-600 hover:bg-slate-50 transition"
+                                        title="Edit election"
+                                        aria-label="Edit election"
+                                    >
+                                        <i class="bi bi-pencil"></i>
+                                    </Link>
+
                                     <form
                                         v-if="election.status === 'pending'"
                                         :action="`/elections/${election.id}/start`"
@@ -257,7 +280,7 @@ const confirmDelete = (name) =>
                                         <input type="hidden" name="_token" :value="$page.props.csrf_token" />
                                         <button
                                             type="submit"
-                                            class="ui-btn-sm inline-flex items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-emerald-700 hover:bg-emerald-100 transition"
+                                            class="ui-btn-sm inline-flex flex-none items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-emerald-700 hover:bg-emerald-100 transition"
                                             title="Start election"
                                             aria-label="Start election"
                                         >
@@ -265,7 +288,6 @@ const confirmDelete = (name) =>
                                         </button>
                                     </form>
 
-                                    <!-- Stop: only when active — amber so it doesn't look like Delete -->
                                     <form
                                         v-if="election.status === 'active'"
                                         :action="`/elections/${election.id}/stop`"
@@ -276,7 +298,7 @@ const confirmDelete = (name) =>
                                         <input type="hidden" name="_token" :value="$page.props.csrf_token" />
                                         <button
                                             type="submit"
-                                            class="ui-btn-sm inline-flex items-center justify-center rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 hover:bg-amber-100 transition"
+                                            class="ui-btn-sm inline-flex flex-none items-center justify-center rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-700 hover:bg-amber-100 transition"
                                             title="Stop election"
                                             aria-label="Stop election"
                                         >
@@ -284,7 +306,6 @@ const confirmDelete = (name) =>
                                         </button>
                                     </form>
 
-                                    <!-- Delete: only when not active -->
                                     <form
                                         v-if="election.status !== 'active'"
                                         :action="`/elections/${election.id}`"
@@ -296,7 +317,7 @@ const confirmDelete = (name) =>
                                         <input type="hidden" name="_method" value="DELETE" />
                                         <button
                                             type="submit"
-                                            class="ui-btn-danger ui-btn-sm"
+                                            class="ui-btn-danger ui-btn-sm flex-none"
                                             title="Delete election"
                                             aria-label="Delete election"
                                         >

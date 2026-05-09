@@ -42,7 +42,12 @@ class BallotManagementController extends Controller
 
         $ballots->setCollection(
             $ballots->getCollection()->map(function (Ballot $ballot) {
-                $ballot->setAttribute('scanned_at_formatted', $ballot->scanned_at?->format('M j, Y g:i A'));
+                $ballot->setAttribute(
+                    'scanned_at_formatted',
+                    $ballot->status === 'scanned' && $ballot->scanned_at
+                        ? $ballot->scanned_at->format('M j, Y g:i A')
+                        : null,
+                );
 
                 return $ballot;
             })

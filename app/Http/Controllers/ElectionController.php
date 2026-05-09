@@ -47,12 +47,23 @@ class ElectionController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'election_name' => ['required', 'string', 'max:255'],
+            'election_name' => [
+                'required', 
+                'string', 
+                'max:255',
+                // Check if this exact name already exists on the given date
+                Rule::unique('elections')->where(function ($query) use ($request) {
+                    return $query->where('election_date', $request->election_date);
+                }),
+            ],
             'election_date' => ['required', 'date', 'after:now'],
             'facilitator_ids' => ['nullable', 'array'],
             'facilitator_ids.*' => [
                 Rule::exists('users', 'id')->where(fn ($query) => $query->where('role', User::ROLE_FACILITATOR)),
             ],
+        ], [
+            // Error message for the duplicate check
+            'election_name.unique' => 'An election with this name already exists on the selected date.',
         ]);
 
         $election = Election::create([
@@ -65,6 +76,51 @@ class ElectionController extends Controller
         return redirect()
             ->route('elections.index')
             ->with('status', 'Election created successfully.');
+    }
+
+    public function edit(Election $election): Response
+    {
+        $facilitators = User::query()
+            ->where('role', User::ROLE_FACILITATOR)
+            ->orderBy('name')
+            ->get(['id', 'name', 'username', 'grade_level']);
+
+        // Load current facilitators relationship so the page can pre-check them
+        $election->load('facilitators:id,name,username,grade_level');
+
+        return Inertia::render('Admin/Elections/Edit', compact('election', 'facilitators'));
+    }
+
+    public function update(Request $request, Election $election): RedirectResponse
+    {
+        $validated = $request->validate([
+            'election_name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('elections')->where(function ($query) use ($request) {
+                    return $query->where('election_date', $request->election_date);
+                })->ignore($election->id),
+            ],
+            'election_date' => ['required', 'date', 'after:now'],
+            'facilitator_ids' => ['nullable', 'array'],
+            'facilitator_ids.*' => [
+                Rule::exists('users', 'id')->where(fn ($query) => $query->where('role', User::ROLE_FACILITATOR)),
+            ],
+        ], [
+            'election_name.unique' => 'An election with this name already exists on the selected date.',
+        ]);
+
+        $election->update([
+            'election_name' => $validated['election_name'],
+            'election_date' => $validated['election_date'],
+        ]);
+
+        $election->facilitators()->sync($validated['facilitator_ids'] ?? []);
+
+        return redirect()
+            ->route('elections.index')
+            ->with('status', 'Election updated successfully.');
     }
 
     public function assignFacilitators(Request $request, Election $election): RedirectResponse

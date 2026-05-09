@@ -22,6 +22,15 @@ function applyFilter() {
 }
 
 const selectedElection = computed(() => props.elections.find((election) => election.id === props.selectedElectionId) ?? null);
+
+// Function to handle report deletion with a confirmation prompt
+const deleteReport = (reportId) => {
+    if (confirm('Are you sure you want to delete this report snapshot? This cannot be undone.')) {
+        router.delete(`/reports/${reportId}`, {
+            preserveScroll: true,
+        });
+    }
+};
 </script>
 
 <template>
@@ -85,10 +94,22 @@ const selectedElection = computed(() => props.elections.find((election) => elect
                             <td class="ui-td">{{ report.generated_date_formatted ?? report.generated_date }}</td>
                             <td class="ui-td">{{ report.election?.label ?? 'Unknown election' }}</td>
                             <td class="ui-td"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-700">{{ report.election?.status ?? 'unknown' }}</span></td>
+                            
                             <td class="ui-td text-right">
-                                <Link :href="`/admin/reports/${report.id}`" class="ui-btn-secondary ui-btn-sm" title="View report details" aria-label="View report details">
-                                    <i class="bi bi-eye"></i>
-                                </Link>
+                                <div class="flex justify-end gap-2">
+                                    <Link :href="`/admin/reports/${report.id}`" class="ui-btn-secondary ui-btn-sm" title="View report details" aria-label="View report details">
+                                        <i class="bi bi-eye"></i>
+                                    </Link>
+                                    <button 
+                                        type="button" 
+                                        @click="deleteReport(report.id)" 
+                                        class="ui-btn-danger ui-btn-sm" 
+                                        title="Delete report" 
+                                        aria-label="Delete report"
+                                    >
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                         <tr v-if="reports.data.length === 0">

@@ -129,7 +129,7 @@ const submitGeneratorForm = () => {
                                     <span v-else class="inline-block px-2 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-800">{{ ballot.status }}</span>
                                 </td>
                                 <td class="px-3 py-2">{{ ballot.votes_count }}</td>
-                                <td class="px-3 py-2">{{ ballot.scanned_at_formatted ?? '-' }}</td>
+                                <td class="px-3 py-2">{{ ballot.status === 'scanned' ? (ballot.scanned_at_formatted ?? '-') : '-' }}</td>
                                 <td class="px-3 py-2">{{ ballot.scanner?.name ?? '-' }}</td>
                                 <td class="px-3 py-2">
                                     <form v-if="!isLocked(ballot)" :action="`/admin/ballot-management/${ballot.id}`" method="POST" @submit="(e) => { if (!confirmDelete()) e.preventDefault(); }">

@@ -66,10 +66,15 @@ class ElectionCompletionService
         $winners = $this->generateWinners($election, $summary);
         $summary['winners'] = $winners;
 
+        // Ensure generated_date is at least the election date (never before election occurs)
+        $generatedDate = $election->election_date && $election->election_date->isFuture()
+            ? $election->election_date
+            : now();
+
         // Create and save the report
         $report = Report::query()->create([
             'election_id' => $election->id,
-            'generated_date' => now(),
+            'generated_date' => $generatedDate,
             'report_data' => $summary,
         ]);
 

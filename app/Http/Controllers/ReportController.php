@@ -60,9 +60,14 @@ class ReportController extends Controller
 
         $election = Election::query()->findOrFail($validated['election_id']);
 
+        // Ensure generated_date is at least the election date (never before election occurs)
+        $generatedDate = $election->election_date && $election->election_date->isFuture()
+            ? $election->election_date
+            : now();
+
         $report = Report::query()->create([
             'election_id' => $election->id,
-            'generated_date' => now(),
+            'generated_date' => $generatedDate,
             'report_data' => $tallyService->buildElectionSummary($election),
         ]);
 
@@ -74,7 +79,10 @@ class ReportController extends Controller
     public function show(Report $report): Response
     {
         $report->loadMissing('election');
-        $report->setAttribute('generated_date_formatted', $report->generated_date?->format('M j, Y g:i A'));
+        $report->setAttribute(
+            'generated_date_formatted',
+            $report->generated_date ? $report->generated_date->format('M j, Y g:i A') : null,
+        );
 
         if ($report->election) {
             $report->election->setAttribute('election_date_formatted', $report->election->election_date?->format('F j, Y g:i A'));
@@ -93,7 +101,10 @@ class ReportController extends Controller
     public function print(Report $report): Response
     {
         $report->loadMissing('election');
-        $report->setAttribute('generated_date_formatted', $report->generated_date?->format('M j, Y g:i A'));
+        $report->setAttribute(
+            'generated_date_formatted',
+            $report->generated_date ? $report->generated_date->format('M j, Y g:i A') : null,
+        );
 
         if ($report->election) {
             $report->election->setAttribute('election_date_formatted', $report->election->election_date?->format('F j, Y g:i A'));
@@ -194,5 +205,16 @@ class ReportController extends Controller
                 'winners' => $reportData['winners'] ?? [],
             ],
         ]);
+    }
+
+    public function destroy(Report $report): RedirectResponse
+    {
+        // The IsAdviser middleware already protects this route, 
+        // but we delete the record from the database.
+        $report->delete();
+
+        return redirect()
+            ->back()
+            ->with('status', 'Report deleted successfully.');
     }
 }
