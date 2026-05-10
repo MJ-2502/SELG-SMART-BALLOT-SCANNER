@@ -150,10 +150,37 @@ class ElectionController extends Controller
             abort(403, 'Adviser access only.');
         }
 
-        // Start this election without forcing other active elections to stop.
-        DB::transaction(function () use ($election) {
+        if ($election->status === 'active') {
+            return redirect()
+                ->route('elections.index')
+                ->with('status', 'This election is already active.');
+        }
+
+        $started = false;
+
+        DB::transaction(function () use ($election, &$started) {
+            Election::query()
+                ->lockForUpdate()
+                ->get(['id']);
+
+            $hasAnotherActiveElection = Election::query()
+                ->where('status', 'active')
+                ->where('id', '!=', $election->id)
+                ->exists();
+
+            if ($hasAnotherActiveElection) {
+                return;
+            }
+
             $election->update(['status' => 'active']);
+            $started = true;
         });
+
+        if (! $started) {
+            return redirect()
+                ->route('elections.index')
+                ->with('error', 'Only one election can be active at a time. Stop the current active election before starting another.');
+        }
 
         return redirect()
             ->route('elections.index')

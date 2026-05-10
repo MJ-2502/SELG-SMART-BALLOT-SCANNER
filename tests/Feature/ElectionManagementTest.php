@@ -41,6 +41,34 @@ class ElectionManagementTest extends TestCase
         $this->assertSame('completed', $election->fresh()->status);
     }
 
+    public function test_adviser_cannot_start_a_second_active_election(): void
+    {
+        $this->actingAsAdviser();
+
+        $firstElection = Election::query()->create([
+            'election_name' => 'First Election',
+            'election_date' => now()->addDays(2),
+            'status' => 'pending',
+        ]);
+
+        $secondElection = Election::query()->create([
+            'election_name' => 'Second Election',
+            'election_date' => now()->addDays(3),
+            'status' => 'pending',
+        ]);
+
+        $this->post(route('elections.start', $firstElection))
+            ->assertRedirect(route('elections.index'));
+
+        $response = $this->post(route('elections.start', $secondElection));
+
+        $response->assertRedirect(route('elections.index'));
+        $response->assertSessionHas('error', 'Only one election can be active at a time. Stop the current active election before starting another.');
+
+        $this->assertSame('active', $firstElection->fresh()->status);
+        $this->assertSame('pending', $secondElection->fresh()->status);
+    }
+
     public function test_adviser_can_delete_non_active_election_and_related_ballots(): void
     {
         $this->actingAsAdviser();
