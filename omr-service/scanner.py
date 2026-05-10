@@ -27,7 +27,7 @@ SCAN_TOP_FRAC    = 0.06
 SCAN_BOTTOM_FRAC = 0.97
 
 # Kept for the mathematical fallback
-SCAN_TOP_PAD_FRAC  = 0.15
+SCAN_TOP_PAD_FRAC  = 0.16
 SCAN_TOP_PAD_PX    = 0      
 SCAN_BOTTOM_PAD_PX = 0
 
