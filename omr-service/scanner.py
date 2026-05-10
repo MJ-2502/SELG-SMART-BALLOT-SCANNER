@@ -27,7 +27,7 @@ SCAN_TOP_FRAC    = 0.06
 SCAN_BOTTOM_FRAC = 0.97
 
 # Kept for the mathematical fallback
-SCAN_TOP_PAD_FRAC  = 0.17   
+SCAN_TOP_PAD_FRAC  = 0.17
 SCAN_TOP_PAD_PX    = 0      
 SCAN_BOTTOM_PAD_PX = 0
 
@@ -374,14 +374,8 @@ class BallotScanner:
 
         slots: List[Dict] = []
         
-        # NEW: Helper to account for the physical ballot padding odd counts to even rows
-        def get_padded_count(row_cands):
-            n = max(1, len(row_cands))
-            return n if n % 2 == 0 else n + 1
-
-        # Smart Fallback check:
-        # Determine total rows using the padded count
-        total_expected_rows = sum(1 + get_padded_count([c for c in rows[r] if not getattr(c, "is_placeholder", False)]) for r in sorted_rows)
+        # Calculate expected rows based on the EXACT number of candidates
+        total_expected_rows = sum(1 + len([c for c in rows[r] if not getattr(c, "is_placeholder", False)]) for r in sorted_rows)
         use_lines = len(exact_y_centers) >= total_expected_rows
 
         if use_lines:
@@ -389,13 +383,11 @@ class BallotScanner:
             center_idx = 0
             for row_idx in sorted_rows:
                 row_candidates = sorted([c for c in rows[row_idx] if not getattr(c, "is_placeholder", False)], key=lambda c: c.col)
-                padded_cands = get_padded_count(row_candidates)
                 
-                # Each position block has 1 header row. Skip its center.
+                # Skip header row center
                 center_idx += 1 
                 
                 for i, cand in enumerate(row_candidates):
-                    # Grab the exact physical coordinate
                     if center_idx < len(exact_y_centers):
                         geom_y = exact_y_centers[center_idx]
                     else:
@@ -403,7 +395,6 @@ class BallotScanner:
                     
                     center_idx += 1
                     
-                    # Snap to nearest detected ring within a tight tolerance
                     best_ring_y, best_dist = None, int(h * 0.015)
                     for ry in ring_ys:
                         if abs(ry - geom_y) < best_dist:
@@ -413,10 +404,6 @@ class BallotScanner:
                     final_y = int(np.clip(final_y, bubble_r, h - bubble_r))
 
                     slots.append(self._create_slot_dict(cand, lane_cx, final_y, geom_y, best_ring_y is not None))
-                    
-                # NEW: Skip any empty padding rows to keep center_idx aligned for the next position
-                empty_slots = padded_cands - len(row_candidates)
-                center_idx += empty_slots
         else:
             # FALLBACK OPTION 1: Math Fractions
             top = int(h * (SCAN_TOP_FRAC + SCAN_TOP_PAD_FRAC))
@@ -425,18 +412,22 @@ class BallotScanner:
             scan_height = bottom - top
 
             HEADER_UNITS = 0.85  
-            total_units = sum(get_padded_count([c for c in rows[r] if not getattr(c, "is_placeholder", False)]) + HEADER_UNITS for r in sorted_rows)
+            
+            # Use exact lengths for total unit calculation
+            total_units = sum(len([c for c in rows[r] if not getattr(c, "is_placeholder", False)]) + HEADER_UNITS for r in sorted_rows)
 
             cursor = float(top)
             for row_idx in sorted_rows:
                 row_candidates = sorted([c for c in rows[row_idx] if not getattr(c, "is_placeholder", False)], key=lambda c: c.col)
-                padded_cands = get_padded_count(row_candidates)
+                num_cands = len(row_candidates)
                 
-                pos_height = scan_height * ((padded_cands + HEADER_UNITS) / total_units)
-                content_top = cursor + pos_height * (HEADER_UNITS / (padded_cands + HEADER_UNITS))
+                if num_cands == 0: continue
                 
-                # Step height is now correctly divided by the padded amount, keeping gap uniform
-                step_h = (pos_height - pos_height * (HEADER_UNITS / (padded_cands + HEADER_UNITS))) / padded_cands
+                pos_height = scan_height * ((num_cands + HEADER_UNITS) / total_units)
+                content_top = cursor + pos_height * (HEADER_UNITS / (num_cands + HEADER_UNITS))
+                
+                # Step height is accurately divided by actual candidates
+                step_h = (pos_height - pos_height * (HEADER_UNITS / (num_cands + HEADER_UNITS))) / num_cands
                 snap_tol = int(step_h * 0.25)
 
                 for i, cand in enumerate(row_candidates):
@@ -447,6 +438,8 @@ class BallotScanner:
                     
                     final_y = int(np.clip(best_ring_y if best_ring_y is not None else geom_y, bubble_r, h - bubble_r))
                     slots.append(self._create_slot_dict(cand, lane_cx, final_y, geom_y, best_ring_y is not None))
+                
+                # Cursor moves down ONLY by the physical space actually used
                 cursor += pos_height
 
         return slots
