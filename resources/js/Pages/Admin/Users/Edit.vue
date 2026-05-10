@@ -26,7 +26,7 @@ const form = useForm({
                 <p class="text-sm text-slate-500 mt-1">Update facilitator account details.</p>
             </div>
 
-            <form @submit.prevent="form.transform((data) => ({ ...data, _method: 'PATCH' })).post(`/facilitators/${props.user.id}`)" class="space-y-8">
+            <form @submit.prevent="form.transform((data) => ({ ...data, _method: 'PATCH' })).post(`/facilitators/${user.id}`)" class="space-y-8">
                 <div>
                     <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Personal Details</h2>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
