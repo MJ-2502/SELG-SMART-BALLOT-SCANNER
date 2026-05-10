@@ -7,6 +7,7 @@ use App\Http\Requests\UpdateUserRequest;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Hash;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -37,7 +38,7 @@ class UserController extends Controller
             'section' => $request->input('section'),           // Added section
             'email' => $this->generatePlaceholderEmail($request->input('username')),
             'role' => User::ROLE_FACILITATOR,
-            'password' => $request->input('password'),
+            'password' => Hash::make($request->input('password')),
         ]);
 
         return redirect()
@@ -68,7 +69,7 @@ class UserController extends Controller
 
         // Only update the password if the user typed a new one in the input field
         if ($request->filled('password')) {
-            $payload['password'] = $request->input('password');
+            $payload['password'] = Hash::make($request->input('password'));
         }
 
         $facilitator->update($payload);
