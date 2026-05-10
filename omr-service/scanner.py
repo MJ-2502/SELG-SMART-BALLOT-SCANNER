@@ -1,13 +1,9 @@
 """
-OMR Scanner — clean rewrite based on the actual ballot structure.
-
 BALLOT LAYOUT (from generated PDF):
-- 8 positions, each with 2 candidates (FORWARD then UNITY)
 - Candidates stack vertically within each position block
 - Each position block has a shaded header row + candidate rows
 - Bubbles are in the leftmost ~8% of the page width
 - The ballot has 4 corner anchor squares (solid black squares, ~6mm)
-- A tear-line separates the ballot from the voter stub
 """
 
 import base64
@@ -378,9 +374,14 @@ class BallotScanner:
 
         slots: List[Dict] = []
         
+        # NEW: Helper to account for the physical ballot padding odd counts to even rows
+        def get_padded_count(row_cands):
+            n = max(1, len(row_cands))
+            return n if n % 2 == 0 else n + 1
+
         # Smart Fallback check:
-        # Determine total rows (1 header + candidates per position)
-        total_expected_rows = sum(1 + len([c for c in rows[r] if not getattr(c, "is_placeholder", False)]) for r in sorted_rows)
+        # Determine total rows using the padded count
+        total_expected_rows = sum(1 + get_padded_count([c for c in rows[r] if not getattr(c, "is_placeholder", False)]) for r in sorted_rows)
         use_lines = len(exact_y_centers) >= total_expected_rows
 
         if use_lines:
@@ -388,6 +389,7 @@ class BallotScanner:
             center_idx = 0
             for row_idx in sorted_rows:
                 row_candidates = sorted([c for c in rows[row_idx] if not getattr(c, "is_placeholder", False)], key=lambda c: c.col)
+                padded_cands = get_padded_count(row_candidates)
                 
                 # Each position block has 1 header row. Skip its center.
                 center_idx += 1 
@@ -411,23 +413,30 @@ class BallotScanner:
                     final_y = int(np.clip(final_y, bubble_r, h - bubble_r))
 
                     slots.append(self._create_slot_dict(cand, lane_cx, final_y, geom_y, best_ring_y is not None))
+                    
+                # NEW: Skip any empty padding rows to keep center_idx aligned for the next position
+                empty_slots = padded_cands - len(row_candidates)
+                center_idx += empty_slots
         else:
-            # FALLBACK OPTION 1: Math Fractions (if line detection fails due to blur/lighting)
+            # FALLBACK OPTION 1: Math Fractions
             top = int(h * (SCAN_TOP_FRAC + SCAN_TOP_PAD_FRAC))
             bottom = int(h * SCAN_BOTTOM_FRAC)
             if top >= bottom: top, bottom = int(h * SCAN_TOP_FRAC), int(h * SCAN_BOTTOM_FRAC)
             scan_height = bottom - top
 
             HEADER_UNITS = 0.85  
-            total_units = sum(max(1, len([c for c in rows[r] if not getattr(c, "is_placeholder", False)])) + HEADER_UNITS for r in sorted_rows)
+            total_units = sum(get_padded_count([c for c in rows[r] if not getattr(c, "is_placeholder", False)]) + HEADER_UNITS for r in sorted_rows)
 
             cursor = float(top)
             for row_idx in sorted_rows:
                 row_candidates = sorted([c for c in rows[row_idx] if not getattr(c, "is_placeholder", False)], key=lambda c: c.col)
-                n_cands = max(1, len(row_candidates))
-                pos_height = scan_height * ((n_cands + HEADER_UNITS) / total_units)
-                content_top = cursor + pos_height * (HEADER_UNITS / (n_cands + HEADER_UNITS))
-                step_h = (pos_height - pos_height * (HEADER_UNITS / (n_cands + HEADER_UNITS))) / n_cands
+                padded_cands = get_padded_count(row_candidates)
+                
+                pos_height = scan_height * ((padded_cands + HEADER_UNITS) / total_units)
+                content_top = cursor + pos_height * (HEADER_UNITS / (padded_cands + HEADER_UNITS))
+                
+                # Step height is now correctly divided by the padded amount, keeping gap uniform
+                step_h = (pos_height - pos_height * (HEADER_UNITS / (padded_cands + HEADER_UNITS))) / padded_cands
                 snap_tol = int(step_h * 0.25)
 
                 for i, cand in enumerate(row_candidates):
@@ -441,7 +450,7 @@ class BallotScanner:
                 cursor += pos_height
 
         return slots
-
+    
     def _create_slot_dict(self, cand: BubbleCandidate, cx: int, cy: int, geom_y: int, snapped: bool) -> Dict:
         return {
             "position_id":         int(cand.position_id),
