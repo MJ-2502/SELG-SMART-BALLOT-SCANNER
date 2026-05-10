@@ -76,6 +76,38 @@ class StoreCandidateRequest extends FormRequest
         ];
     }
 
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            $party = $this->normalizedParty();
+            $positionId = $this->input('position_id');
+
+            // Capacity Checker: Only check if they selected a party and a position
+            if ($party !== null && $positionId) {
+                $position = \App\Models\Position::find($positionId);
+                
+                if ($position) {
+                    // Count how many candidates are currently in this exact party + position
+                    $currentCount = \App\Models\Candidate::query()
+                        ->where('position_id', $positionId)
+                        ->whereRaw('LOWER(TRIM(party)) = ?', [$party])
+                        ->count();
+
+                    $maxAllowed = $position->max_candidates_per_party ?? 1;
+
+                    // Block submission if the roster is full
+                    if ($currentCount >= $maxAllowed) {
+                        $partyName = $this->input('party');
+                        $validator->errors()->add(
+                            'party', 
+                            "The partylist \"{$partyName}\" already has the maximum allowed candidates ({$maxAllowed}) for {$position->name}."
+                        );
+                    }
+                }
+            }
+        });
+    }
+
     private function normalizedParty(): ?string
     {
         $party = trim((string) $this->input('party', ''));

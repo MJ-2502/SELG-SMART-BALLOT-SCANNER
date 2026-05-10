@@ -72,17 +72,6 @@ function submit() {
             </div>
         </div>
 
-        <div class="flex items-center justify-between">
-            <label class="flex items-center cursor-pointer">
-                <input 
-                    type="checkbox" 
-                    v-model="form.remember" 
-                    class="rounded border-slate-300 text-indigo-600 shadow-sm focus:ring-indigo-500" 
-                />
-                <span class="ml-2 text-sm text-slate-600">Remember me</span>
-            </label>
-        </div>
-
         <button 
             type="submit" 
             class="inline-flex w-full items-center justify-center rounded-xl border border-transparent bg-gray-800 px-4 py-3 text-xs font-semibold uppercase tracking-widest text-white transition duration-150 ease-in-out hover:bg-gray-700 focus:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 active:bg-gray-900 disabled:opacity-50" 

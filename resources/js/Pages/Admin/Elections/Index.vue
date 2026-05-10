@@ -263,7 +263,7 @@ const confirmDelete = (name) =>
                                     <Link
                                         v-if="election.status === 'pending'"
                                         :href="`/elections/${election.id}/edit`"
-                                        class="ui-btn-sm inline-flex flex-none items-center justify-center rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-slate-600 hover:bg-slate-50 transition"
+                                        class="ui-btn-secondary ui-btn-sm"
                                         title="Edit election"
                                         aria-label="Edit election"
                                     >

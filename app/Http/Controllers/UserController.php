@@ -32,8 +32,10 @@ class UserController extends Controller
         User::create([
             'name' => $request->input('name'),
             'username' => $request->input('username'),
+            'gender' => $request->input('gender'),             // Added gender
             'grade_level' => $request->input('grade_level'),
-            'email' => $this->generatePlaceholderEmail($request->input('username')),
+            'section' => $request->input('section'),           // Added section
+            // 'email' => $this->generatePlaceholderEmail($request->input('username')),
             'role' => User::ROLE_FACILITATOR,
             'password' => $request->input('password'),
         ]);
@@ -45,22 +47,26 @@ class UserController extends Controller
 
     public function edit(User $facilitator): Response
     {
+        // Ensure we are only editing facilitators
         abort_if($facilitator->role !== User::ROLE_FACILITATOR, 404);
 
-        return Inertia::render('Admin/Users/Edit', ['user' => $facilitator]);
+        return Inertia::render('Admin/Users/Edit', [
+            'user' => $facilitator
+        ]);
     }
 
     public function update(UpdateUserRequest $request, User $facilitator): RedirectResponse
     {
-        abort_if($facilitator->role !== User::ROLE_FACILITATOR, 404);
-
         $payload = [
             'name' => $request->input('name'),
             'username' => $request->input('username'),
+            'gender' => $request->input('gender'),             // Added gender
             'grade_level' => $request->input('grade_level'),
+            'section' => $request->input('section'),           // Added section
             'role' => User::ROLE_FACILITATOR,
         ];
 
+        // Only update the password if the user typed a new one in the input field
         if ($request->filled('password')) {
             $payload['password'] = $request->input('password');
         }
@@ -89,17 +95,17 @@ class UserController extends Controller
             ->with('status', 'Facilitator account deleted successfully.');
     }
 
-    private function generatePlaceholderEmail(string $username): string
-    {
-        $base = Str::lower($username);
-        $candidate = "{$base}@facilitator.local";
-        $suffix = 1;
+    // private function generatePlaceholderEmail(string $username): string
+    // {
+    //     $base = Str::lower($username);
+    //     $candidate = "{$base}@facilitator.local";
+    //     $suffix = 1;
 
-        while (User::query()->where('email', $candidate)->exists()) {
-            $candidate = "{$base}.{$suffix}@facilitator.local";
-            $suffix++;
-        }
+    //     while (User::query()->where('email', $candidate)->exists()) {
+    //         $candidate = "{$base}{$suffix}@facilitator.local";
+    //         $suffix++;
+    //     }
 
-        return $candidate;
-    }
+    //     return $candidate;
+    // }
 }

@@ -1145,7 +1145,7 @@ onBeforeUnmount(() => {
         <!-- Page header -->
         <div v-show="!mobileCameraActive" class="px-4 sm:px-0 pt-4 pb-2">
             <h1 class="text-xl font-bold tracking-tight text-slate-900">Ballot Scanner</h1>
-            <p class="text-xs text-slate-400 mt-0.5">{{ positions.length }} position(s) · {{ layoutCount }} slot(s)</p>
+            <p class="text-xs text-slate-400 mt-0.5">{{ positions.length }} position(s) · {{ layoutCount }} Candidates</p>
         </div>
 
         <!-- ── STEP 1: Ballot number ── -->

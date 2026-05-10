@@ -62,6 +62,44 @@ class UpdateCandidateRequest extends FormRequest
         ];
     }
 
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            $party = $this->normalizedParty();
+            $positionId = $this->input('position_id');
+            $candidate = $this->route('candidate');
+            
+            // Get the ID of the candidate we are currently editing
+            $ignoreCandidateId = $candidate instanceof \App\Models\Candidate ? $candidate->id : (is_numeric($candidate) ? (int) $candidate : null);
+
+            if ($party !== null && $positionId) {
+                $position = \App\Models\Position::find($positionId);
+                
+                if ($position) {
+                    $query = \App\Models\Candidate::query()
+                        ->where('position_id', $positionId)
+                        ->whereRaw('LOWER(TRIM(party)) = ?', [$party]);
+
+                    // Ignore the current candidate when counting the party capacity
+                    if ($ignoreCandidateId !== null) {
+                        $query->where('id', '!=', $ignoreCandidateId);
+                    }
+
+                    $currentCount = $query->count();
+                    $maxAllowed = $position->max_candidates_per_party ?? 1;
+
+                    if ($currentCount >= $maxAllowed) {
+                        $partyName = $this->input('party');
+                        $validator->errors()->add(
+                            'party', 
+                            "The partylist \"{$partyName}\" already has the maximum allowed candidates ({$maxAllowed}) for {$position->name}."
+                        );
+                    }
+                }
+            }
+        });
+    }
+
     public function messages(): array
     {
         return [

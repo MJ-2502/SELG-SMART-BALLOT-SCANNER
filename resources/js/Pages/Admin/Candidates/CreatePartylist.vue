@@ -67,15 +67,8 @@ const selectColor = (color) => {
                 <div>
                     <div class="flex items-end justify-between mb-1">
                         <label class="block text-sm font-medium" for="party">Partylist Name</label>
-                        <button v-if="existingParties.length > 0" type="button" @click="togglePartyMode" class="text-xs font-medium text-slate-500 hover:text-slate-800 transition underline">
-                            {{ isNewParty ? 'Select an existing partylist' : 'Create a new partylist instead' }}
-                        </button>
                     </div>
-                    <select v-if="!isNewParty && existingParties.length > 0" v-model="form.party" class="ui-input" required>
-                        <option value="" disabled>Select an existing partylist...</option>
-                        <option v-for="party in existingParties" :key="party" :value="party">{{ party }}</option>
-                    </select>
-                    <input v-else v-model="form.party" type="text" class="ui-input" placeholder="Enter new partylist name" required />
+                    <input v-model="form.party" type="text" class="ui-input" placeholder="Enter new partylist name" required />
                     <p v-if="form.errors.party" class="text-sm text-red-600 mt-1">{{ form.errors.party }}</p>
                 </div>
 

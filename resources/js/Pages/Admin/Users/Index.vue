@@ -9,6 +9,23 @@ defineProps({ users: Array });
 
 const showStatus = ref(true);
 
+// Modal state management
+const isModalOpen = ref(false);
+const selectedUser = ref(null);
+
+const openDetails = (user) => {
+    selectedUser.value = user;
+    isModalOpen.value = true;
+};
+
+const closeModal = () => {
+    isModalOpen.value = false;
+    // Small timeout to allow the fade-out transition before wiping data
+    setTimeout(() => {
+        selectedUser.value = null;
+    }, 200);
+};
+
 const confirmDelete = () => window.confirm('Delete this facilitator? This action cannot be undone.');
 </script>
 
@@ -17,7 +34,6 @@ const confirmDelete = () => window.confirm('Delete this facilitator? This action
 
     <div class="ui-page">
 
-        <!-- Page Header -->
         <div class="ui-card mb-6">
             <div class="flex justify-between items-center">
                 <div>
@@ -28,83 +44,50 @@ const confirmDelete = () => window.confirm('Delete this facilitator? This action
             </div>
         </div>
 
-        <!-- Flash: success -->
         <div
-            v-if="$page.props.flash.status && showStatus"
+            v-if="$page.props.flash?.status && showStatus"
             class="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 mb-4"
             role="alert"
         >
-            <svg class="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-            <p class="text-sm text-emerald-800 flex-1">{{ $page.props.flash.status }}</p>
-            <button type="button" class="ml-auto text-emerald-500 hover:text-emerald-700" @click="showStatus = false" aria-label="Dismiss">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
+            <div class="text-emerald-800 text-sm font-medium">{{ $page.props.flash.status }}</div>
+            <button @click="showStatus = false" class="ml-auto text-emerald-600 hover:text-emerald-800">&times;</button>
         </div>
 
-        <!-- Facilitators table -->
-        <div class="ui-card overflow-hidden">
-            <div class="overflow-x-auto -mx-4 sm:-mx-6 px-4 sm:px-6">
-                <table class="ui-table w-full">
-                    <thead>
-                        <tr class="ui-row">
-                            <th class="ui-th">Name</th>
-                            <th class="ui-th">Username</th>
-                            <th class="ui-th w-36">Grade Level</th>
-                            <th class="ui-th w-24">Actions</th>
+        <div class="ui-card p-0 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-slate-600">
+                    <thead class="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                        <tr>
+                            <th class="px-6 py-4">Facilitator Name</th>
+                            <th class="px-6 py-4">Username</th>
+                            <th class="px-6 py-4">Password</th>
+                            <th class="px-6 py-4 text-right">Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <!-- Empty state -->
-                        <tr v-if="users.length === 0">
-                            <td colspan="4" class="py-12 text-center">
-                                <svg class="mx-auto h-10 w-10 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg>
-                                <p class="text-sm font-medium text-slate-600 mb-1">No facilitators yet</p>
-                                <p class="text-xs text-slate-400">Add a facilitator account to allow scanner operation.</p>
-                            </td>
-                        </tr>
+                    <tbody class="divide-y divide-slate-200">
+                        <tr v-for="user in users" :key="user.id" class="hover:bg-slate-50 transition-colors">
+                            <td class="px-6 py-4 font-medium text-slate-900">{{ user.name }}</td>
+                            <td class="px-6 py-4">{{ user.username }}</td>
+                            <td class="px-6 py-4 text-slate-400 italic">********</td>
+                            <td class="px-6 py-4 text-right">
+                                <div class="flex justify-end items-center gap-2">
+                                    
+                                    <button
+                                        @click="openDetails(user)"
+                                        class="ui-btn-secondary ui-btn-sm !px-2.5"
+                                        title="View details"
+                                    >
+                                        <i class="bi bi-eye"></i>
+                                    </button>
 
-                        <tr
-                            v-for="user in users"
-                            :key="user.id"
-                            class="ui-row hover:bg-slate-50 transition-colors"
-                        >
-
-                            <!-- Name with avatar initials -->
-                            <td class="ui-td">
-                                <div class="flex items-center gap-2.5">
-                                    <span class="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
-                                        {{ user.name?.charAt(0)?.toUpperCase() ?? '?' }}
-                                    </span>
-                                    <span class="font-medium text-slate-800">{{ user.name }}</span>
-                                </div>
-                            </td>
-
-                            <!-- Username: monospace for credential readability -->
-                            <td class="ui-td">
-                                <span class="inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700 ring-1 ring-inset ring-slate-200">
-                                    <svg class="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
-                                    {{ user.username }}
-                                </span>
-                            </td>
-
-                            <!-- Grade level badge -->
-                            <td class="ui-td">
-                                <span class="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
-                                    Grade {{ user.grade_level }}
-                                </span>
-                            </td>
-
-                            <!-- Actions -->
-                            <td class="ui-td">
-                                <div class="flex gap-2">
                                     <Link
                                         :href="`/facilitators/${user.id}/edit`"
                                         class="ui-btn-secondary ui-btn-sm"
                                         title="Edit facilitator"
-                                        aria-label="Edit facilitator"
                                     >
                                         <i class="bi bi-pen"></i>
                                     </Link>
+
                                     <form
                                         :action="`/facilitators/${user.id}`"
                                         method="POST"
@@ -117,17 +100,70 @@ const confirmDelete = () => window.confirm('Delete this facilitator? This action
                                             type="submit"
                                             class="ui-btn-danger ui-btn-sm"
                                             title="Delete facilitator"
-                                            aria-label="Delete facilitator"
                                         >
                                             <i class="bi bi-trash"></i>
                                         </button>
                                     </form>
+
                                 </div>
+                            </td>
+                        </tr>
+                        <tr v-if="!users || users.length === 0">
+                            <td colspan="4" class="px-6 py-8 text-center text-slate-500">
+                                No facilitators found. Click "Add Facilitator" to create one.
                             </td>
                         </tr>
                     </tbody>
                 </table>
             </div>
         </div>
-    </div>
+
+        <div v-if="isModalOpen" class="relative z-50" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+            <div 
+                class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm transition-opacity" 
+                @click="closeModal"
+            ></div>
+
+            <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+                <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                    <div 
+                        class="relative transform overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-md"
+                        @click.stop
+                    >
+                        <div class="bg-white px-6 pb-6 pt-6 text-left">
+                            <div class="flex items-center justify-between mb-5">
+                                <h3 class="text-lg font-bold text-slate-900" id="modal-title">Facilitator Details</h3>
+                                <button @click="closeModal" class="text-slate-400 hover:text-slate-600">
+                                    <i class="bi bi-x-lg text-lg"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="space-y-4 text-sm text-slate-600" v-if="selectedUser">
+                                <div class="grid grid-cols-3 gap-4 border-b border-slate-100 pb-3">
+                                    <span class="font-medium text-slate-400 uppercase tracking-wider text-xs">Full Name</span>
+                                    <span class="col-span-2 text-slate-900 font-semibold">{{ selectedUser.name }}</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-4 border-b border-slate-100 pb-3">
+                                    <span class="font-medium text-slate-400 uppercase tracking-wider text-xs">Gender</span>
+                                    <span class="col-span-2 text-slate-800">{{ selectedUser.gender || 'N/A' }}</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-4 border-b border-slate-100 pb-3">
+                                    <span class="font-medium text-slate-400 uppercase tracking-wider text-xs">Grade Level</span>
+                                    <span class="col-span-2 text-slate-800">{{ selectedUser.grade_level || 'N/A' }}</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-4 border-b border-slate-100 pb-3">
+                                    <span class="font-medium text-slate-400 uppercase tracking-wider text-xs">Section</span>
+                                    <span class="col-span-2 text-slate-800">{{ selectedUser.section || 'N/A' }}</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-4 pb-1">
+                                    <span class="font-medium text-slate-400 uppercase tracking-wider text-xs">Username</span>
+                                    <span class="col-span-2 text-slate-800">{{ selectedUser.username }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
 </template>

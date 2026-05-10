@@ -15,7 +15,7 @@ const user = page.props.auth?.user ?? {};
 const profileForm = useForm({
     name: user.name ?? '',
     username: user.username ?? '',
-    email: user.email ?? '',
+    // email: user.email ?? '',
 });
 
 const passwordForm = useForm({
@@ -66,7 +66,7 @@ function updatePassword() {
                         <p v-if="profileForm.errors.username" class="mt-1 text-sm text-red-600">{{ profileForm.errors.username }}</p>
                     </div>
 
-                    <div>
+                    <!-- <div>
                         <label class="block text-sm font-medium mb-1">Email</label>
                         <input v-model="profileForm.email" type="email" class="ui-input" required />
                         <p v-if="profileForm.errors.email" class="mt-1 text-sm text-red-600">{{ profileForm.errors.email }}</p>
@@ -74,7 +74,7 @@ function updatePassword() {
 
                     <p v-if="mustVerifyEmail && user.email_verified_at === null" class="text-sm text-amber-700">
                         Your email address is unverified.
-                    </p>
+                    </p> -->
 
                     <p v-if="status === 'profile-updated'" class="text-sm text-emerald-700">Profile updated successfully.</p>
 
