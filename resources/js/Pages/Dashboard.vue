@@ -43,26 +43,41 @@ const getStatus = (status) =>
         badge: 'bg-slate-100 text-slate-500 border-slate-200',
     };
 
-// election_date is a single datetime — format it nicely
-const formatDate = (iso) => {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('en-PH', {
-        weekday: 'short', month: 'long', day: 'numeric', year: 'numeric',
-    });
+// election_date is a single datetime — parse as local wall-clock (avoid ISO timezone conversion)
+const parseLocalDate = (input) => {
+    if (!input) return null;
+    try {
+        const s = String(input);
+        // If input contains explicit timezone info, fall back to Date parsing
+        if (s.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s);
+
+        // Normalize 'YYYY-MM-DDTHH:MM:SS' or 'YYYY-MM-DD HH:MM:SS' to components
+        const normalized = s.replace('T', ' ').split('.')[0];
+        const [datePart, timePart] = normalized.split(' ');
+        const [y, m, d] = (datePart || '').split('-').map(Number);
+        const [hh = 0, mm = 0, ss = 0] = (timePart || '').split(':').map((n) => Number(n));
+        return new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, ss || 0);
+    } catch (e) {
+        return new Date(input);
+    }
 };
 
-const formatDateShort = (iso) => {
-    if (!iso) return null;
-    return new Date(iso).toLocaleDateString('en-PH', {
-        month: 'short', day: 'numeric', year: 'numeric',
-    });
+const formatDate = (input) => {
+    const d = parseLocalDate(input);
+    if (!d) return '—';
+    return d.toLocaleDateString('en-PH', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' });
 };
 
-const formatTime = (iso) => {
-    if (!iso) return null;
-    return new Date(iso).toLocaleTimeString('en-PH', {
-        hour: 'numeric', minute: '2-digit', hour12: true,
-    });
+const formatDateShort = (input) => {
+    const d = parseLocalDate(input);
+    if (!d) return null;
+    return d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+const formatTime = (input) => {
+    const d = parseLocalDate(input);
+    if (!d) return null;
+    return d.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit', hour12: true });
 };
 
 const scannerUrl = (election) =>

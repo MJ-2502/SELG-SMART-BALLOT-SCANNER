@@ -207,7 +207,7 @@ const downloadJSON = () => {
     election_id: props.electionId,
     election_status: electionStatus.value,
     winners: winners.value,
-    generated_at: new Date().toISOString()
+    generated_at: electionStatus.value?.result_generated_at ?? new Date().toISOString(),
   }
   const json = JSON.stringify(data, null, 2)
   const blob = new Blob([json], { type: 'application/json' })

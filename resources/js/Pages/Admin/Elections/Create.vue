@@ -8,12 +8,6 @@ const props = defineProps({ facilitators: Array });
 const form = useForm({ election_name: '', election_date: '', facilitator_ids: [] });
 
 const submitForm = () => {
-    // Convert datetime-local (browser local time) to UTC ISO string
-    if (form.election_date) {
-        const localDate = new Date(form.election_date);
-        // Convert to UTC by getting the ISO string
-        form.election_date = localDate.toISOString();
-    }
     form.post('/elections');
 };
 </script>

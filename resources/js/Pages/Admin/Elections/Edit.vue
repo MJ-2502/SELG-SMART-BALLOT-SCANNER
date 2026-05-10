@@ -6,15 +6,13 @@ defineOptions({ layout: AdminLayout });
 
 const props = defineProps({ election: Object, facilitators: Array });
 
-// Convert ISO date (server) to `datetime-local` value in local timezone
-const toLocalDateInput = (iso) => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// Keep the exact wall-clock datetime without timezone conversion.
+const toDateTimeLocalInput = (value) => {
+    if (!value) return '';
+    return String(value).replace(' ', 'T').slice(0, 16);
 };
 
-const initialDate = toLocalDateInput(props.election.election_date ?? props.election.election_date_formatted ?? '');
+const initialDate = toDateTimeLocalInput(props.election.election_date ?? '');
 
 const form = useForm({
     election_name: props.election.election_name || '',
@@ -23,10 +21,6 @@ const form = useForm({
 });
 
 const submitForm = () => {
-    if (form.election_date) {
-        const localDate = new Date(form.election_date);
-        form.election_date = localDate.toISOString();
-    }
     form.patch(`/elections/${props.election.id}`);
 };
 </script>

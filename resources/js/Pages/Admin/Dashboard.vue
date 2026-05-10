@@ -80,18 +80,32 @@ const submissionInsight = computed(() => {
 });
 
 // --- Date formatting ---
-const formatDate = (iso) => {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('en-PH', {
-        weekday: 'short', month: 'long', day: 'numeric', year: 'numeric',
-    });
+// Parse server-provided wall-clock date strings without introducing timezone shifts
+const parseLocalDate = (input) => {
+    if (!input) return null;
+    try {
+        const s = String(input);
+        if (s.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s);
+        const normalized = s.replace('T', ' ').split('.')[0];
+        const [datePart, timePart] = normalized.split(' ');
+        const [y, m, d] = (datePart || '').split('-').map(Number);
+        const [hh = 0, mm = 0, ss = 0] = (timePart || '').split(':').map((n) => Number(n));
+        return new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, ss || 0);
+    } catch (e) {
+        return new Date(input);
+    }
 };
 
-const formatTime = (iso) => {
-    if (!iso) return null;
-    return new Date(iso).toLocaleTimeString('en-PH', {
-        hour: 'numeric', minute: '2-digit', hour12: true,
-    });
+const formatDate = (input) => {
+    const d = parseLocalDate(input);
+    if (!d) return '—';
+    return d.toLocaleDateString('en-PH', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' });
+};
+
+const formatTime = (input) => {
+    const d = parseLocalDate(input);
+    if (!d) return null;
+    return d.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit', hour12: true });
 };
 
 // --- Responsive chart grid ---

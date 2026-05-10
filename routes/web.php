@@ -49,12 +49,15 @@ Route::get('/dashboard', function () {
         ->orderByDesc('election_date')
         ->get()
         ->map(fn (Election $e) => [
-            'id'              => $e->id,
-            'election_name'   => $e->election_name,
-            'election_date'   => $e->election_date?->toISOString(),
-            'status'          => $e->status,
-            'total_ballots'   => $e->total_ballots,
-            'scanned_ballots' => $e->scanned_ballots,
+            'id'                        => $e->id,
+            'election_name'             => $e->election_name,
+            // Provide a raw wall-clock string and human-friendly formats from server
+            'election_date'             => $e->election_date?->format('Y-m-d H:i'),
+            'election_date_formatted'   => $e->election_date?->format('F j, Y g:i A'),
+            'election_time'             => $e->election_date?->format('g:i A'),
+            'status'                    => $e->status,
+            'total_ballots'             => $e->total_ballots,
+            'scanned_ballots'           => $e->scanned_ballots,
         ]);
 
     return Inertia::render('Dashboard', [
