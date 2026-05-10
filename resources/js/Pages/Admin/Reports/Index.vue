@@ -92,7 +92,7 @@ const deleteReport = (reportId) => {
                     <tbody>
                         <tr v-for="report in reports.data" :key="report.id" class="ui-row">
                             <td class="ui-td">{{ report.generated_date_formatted ?? report.generated_date }}</td>
-                            <td class="ui-td">{{ report.election?.label ?? 'Unknown election' }}</td>
+                            <td class="ui-td">{{ report.election_label_snapshot ?? report.election?.label ?? 'Unknown election' }}</td>
                             <td class="ui-td"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-700">{{ report.election?.status ?? 'unknown' }}</span></td>
                             
                             <td class="ui-td text-right">

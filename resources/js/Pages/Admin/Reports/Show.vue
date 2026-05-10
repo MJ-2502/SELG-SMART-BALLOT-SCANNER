@@ -113,7 +113,7 @@ const getPercent = (votes, total) => {
             <div class="flex flex-wrap items-start justify-between gap-4 mb-8 border-b border-slate-100 pb-6">
                 <div>
                     <h1 class="text-2xl font-bold text-slate-900">Election Report</h1>
-                    <p class="text-slate-500 mt-1">{{ report.election?.label ?? 'Unknown election' }} • Generated {{ report.generated_date_formatted ?? report.generated_date }}</p>
+                    <p class="text-slate-500 mt-1">{{ report.election_label_snapshot ?? report.election?.label ?? 'Unknown election' }} • Generated {{ report.generated_date_formatted ?? report.generated_date }}</p>
                 </div>
                 <div class="flex flex-wrap gap-3">
                     <Link href="/admin/reports" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">Back to Reports</Link>

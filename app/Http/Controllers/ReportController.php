@@ -67,6 +67,7 @@ class ReportController extends Controller
 
         $report = Report::query()->create([
             'election_id' => $election->id,
+            'election_label_snapshot' => $election->label,
             'generated_date' => $generatedDate,
             'report_data' => $tallyService->buildElectionSummary($election),
         ]);

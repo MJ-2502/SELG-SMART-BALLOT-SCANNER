@@ -200,9 +200,15 @@ class ElectionController extends Controller
         DB::transaction(function () use ($election, &$deletedBallots) {
             $deletedBallots = $election->ballots()->count();
 
+            // Keep generated reports as historical records even after the election row is removed.
+            $election->reports()->update([
+                'election_label_snapshot' => $election->label,
+                'election_id' => null,
+            ]);
+
             // Deleting ballots also cascades related votes via foreign key constraints.
             $election->ballots()->delete();
-            $election->delete();
+            $election->forceDelete();
         });
 
         return redirect()

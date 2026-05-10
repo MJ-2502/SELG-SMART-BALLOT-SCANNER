@@ -12,6 +12,7 @@ class Report extends Model
 
     protected $fillable = [
         'election_id',
+        'election_label_snapshot',
         'generated_date',
         'report_data',
     ];

@@ -7,7 +7,7 @@ const props = defineProps({
     reportData: Object,
 });
 
-const electionLabel = computed(() => props.report?.election?.label || props.report?.election?.election_name || 'Election');
+const electionLabel = computed(() => props.report?.election_label_snapshot || props.report?.election?.label || props.report?.election?.election_name || 'Election');
 const generatedAt = computed(() => props.report?.generated_date_formatted || props.report?.generated_date || '');
 const winnersByPosition = computed(() => props.reportData?.winners ?? []);
 const hasWinners = computed(() => Array.isArray(winnersByPosition.value) && winnersByPosition.value.length > 0);
