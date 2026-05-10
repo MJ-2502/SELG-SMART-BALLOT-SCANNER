@@ -23,6 +23,7 @@ class User extends Authenticatable
         'grade_level',
         'email',
         'password',
+        'plain_password',
         'role',
     ];
 

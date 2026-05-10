@@ -30,6 +30,8 @@ class UserController extends Controller
 
     public function store(StoreUserRequest $request): RedirectResponse
     {
+        $password = $request->input('password');
+        
         User::create([
             'name' => $request->input('name'),
             'username' => $request->input('username'),
@@ -38,7 +40,8 @@ class UserController extends Controller
             'section' => $request->input('section'),           // Added section
             'email' => $this->generatePlaceholderEmail($request->input('username')),
             'role' => User::ROLE_FACILITATOR,
-            'password' => Hash::make($request->input('password')),
+            'password' => Hash::make($password),
+            'plain_password' => $password,
         ]);
 
         return redirect()
@@ -69,7 +72,9 @@ class UserController extends Controller
 
         // Only update the password if the user typed a new one in the input field
         if ($request->filled('password')) {
-            $payload['password'] = Hash::make($request->input('password'));
+            $password = $request->input('password');
+            $payload['password'] = Hash::make($password);
+            $payload['plain_password'] = $password;
         }
 
         $facilitator->update($payload);

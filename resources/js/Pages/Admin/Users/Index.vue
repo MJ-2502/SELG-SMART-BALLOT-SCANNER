@@ -9,9 +9,22 @@ defineProps({ users: Array });
 
 const showStatus = ref(true);
 
+// Password visibility toggle
+const visiblePasswordIds = ref({});
+
 // Modal state management
 const isModalOpen = ref(false);
 const selectedUser = ref(null);
+
+const togglePasswordVisibility = (userId) => {
+    const nextVisibility = {};
+
+    if (!visiblePasswordIds.value[userId]) {
+        nextVisibility[userId] = true;
+    }
+
+    visiblePasswordIds.value = nextVisibility;
+};
 
 const openDetails = (user) => {
     selectedUser.value = user;
@@ -68,7 +81,23 @@ const confirmDelete = () => window.confirm('Delete this facilitator? This action
                         <tr v-for="user in users" :key="user.id" class="hover:bg-slate-50 transition-colors">
                             <td class="px-6 py-4 font-medium text-slate-900">{{ user.name }}</td>
                             <td class="px-6 py-4">{{ user.username }}</td>
-                            <td class="px-6 py-4 text-slate-400 italic">********</td>
+                            <td class="px-6 py-4">
+                                <div class="flex items-center gap-2">
+                                    <span :class="[
+                                        'font-mono text-sm',
+                                        visiblePasswordIds[user.id] ? 'text-slate-900' : 'text-slate-400 italic'
+                                    ]">
+                                        {{ visiblePasswordIds[user.id] ? user.plain_password : '**************' }}
+                                    </span>
+                                    <button
+                                        @click="togglePasswordVisibility(user.id)"
+                                        :title="visiblePasswordIds[user.id] ? 'Hide password' : 'Show password'"
+                                        class="text-slate-400 hover:text-slate-600 transition-colors"
+                                    >
+                                        <i :class="['bi', visiblePasswordIds[user.id] ? 'bi-eye-slash' : 'bi-eye']"></i>
+                                    </button>
+                                </div>
+                            </td>
                             <td class="px-6 py-4 text-right">
                                 <div class="flex justify-end items-center gap-2">
                                     
