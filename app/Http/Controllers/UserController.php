@@ -35,7 +35,7 @@ class UserController extends Controller
             'gender' => $request->input('gender'),             // Added gender
             'grade_level' => $request->input('grade_level'),
             'section' => $request->input('section'),           // Added section
-            // 'email' => $this->generatePlaceholderEmail($request->input('username')),
+            'email' => $this->generatePlaceholderEmail($request->input('username')),
             'role' => User::ROLE_FACILITATOR,
             'password' => $request->input('password'),
         ]);
@@ -95,17 +95,17 @@ class UserController extends Controller
             ->with('status', 'Facilitator account deleted successfully.');
     }
 
-    // private function generatePlaceholderEmail(string $username): string
-    // {
-    //     $base = Str::lower($username);
-    //     $candidate = "{$base}@facilitator.local";
-    //     $suffix = 1;
+    private function generatePlaceholderEmail(string $username): string
+    {
+        $base = Str::lower($username);
+        $candidate = "{$base}@facilitator.local";
+        $suffix = 1;
 
-    //     while (User::query()->where('email', $candidate)->exists()) {
-    //         $candidate = "{$base}{$suffix}@facilitator.local";
-    //         $suffix++;
-    //     }
+        while (User::query()->where('email', $candidate)->exists()) {
+            $candidate = "{$base}{$suffix}@facilitator.local";
+            $suffix++;
+        }
 
-    //     return $candidate;
-    // }
+        return $candidate;
+    }
 }
