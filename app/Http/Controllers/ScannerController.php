@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Ballot;
+use App\Models\BallotFlag;
 use App\Models\Candidate;
 use App\Models\Election;
 use App\Models\Vote;
@@ -79,6 +80,7 @@ class ScannerController extends Controller
             'layoutCount' => $this->buildBallotLayout($layoutPositions)->count(),
             'scanUrl' => route('scanner.scan'),
             'submitUrl' => route('scanner.submit'),
+            'flagUrl' => route('scanner.flag'),
         ]);
     }
 
@@ -506,6 +508,91 @@ class ScannerController extends Controller
             'election_status' => $electionStatus,
             'election_completed' => $electionCompleted,
             'winners' => $winners,
+        ]);
+    }
+
+    public function flag(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'ballot_id' => ['nullable', 'integer', 'exists:ballots,id'],
+            'election_id' => ['required_without:ballot_id', 'integer', 'exists:elections,id'],
+            'ballot_number' => ['required_without:ballot_id', 'integer', 'min:1'],
+            'reason' => ['required', 'string', 'in:unscannable,rules_violation'],
+        ]);
+
+        if (! empty($validated['election_id']) && ! $this->canScanElection((int) $validated['election_id'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not assigned to scan ballots for the selected election.',
+                'errors' => ['Election access denied.'],
+            ], 403);
+        }
+
+        $ballotQuery = Ballot::query();
+        if (! empty($validated['ballot_id'])) {
+            $ballotQuery->where('id', $validated['ballot_id']);
+        } else {
+            $ballotQuery->where('election_id', $validated['election_id'] ?? null)
+                ->where('ballot_number', $validated['ballot_number'] ?? null);
+        }
+
+        $ballot = $ballotQuery->first();
+        if (! $ballot) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ballot not found for the provided election and ballot number.',
+                'errors' => ['Ballot lookup failed.'],
+            ], 404);
+        }
+
+        if ($ballot->election_id && ! $this->canScanElection((int) $ballot->election_id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not assigned to scan ballots for the selected election.',
+                'errors' => ['Election access denied.'],
+            ], 403);
+        }
+
+        if ($ballot->status === 'scanned') {
+            return response()->json([
+                'success' => false,
+                'message' => 'This ballot is already scanned and cannot be flagged.',
+                'errors' => ['Ballot already scanned.'],
+            ], 409);
+        }
+
+        $updates = [
+            'status' => 'flagged',
+        ];
+        if (! $ballot->scanned_at) {
+            $updates['scanned_at'] = now();
+        }
+        if (! $ballot->scanned_by) {
+            $updates['scanned_by'] = auth()->id();
+        }
+        $ballot->update($updates);
+
+        $flag = BallotFlag::query()->create([
+            'ballot_id' => $ballot->id,
+            'reason' => $validated['reason'],
+            'flagged_by' => auth()->id(),
+            'flagged_at' => now(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Ballot flagged successfully.',
+            'flag' => [
+                'id' => $flag->id,
+                'ballot_id' => $ballot->id,
+                'reason' => $flag->reason,
+                'flagged_at' => $flag->flagged_at?->toIso8601String(),
+            ],
+            'ballot' => [
+                'id' => $ballot->id,
+                'ballot_number' => $ballot->ballot_number,
+                'election_id' => $ballot->election_id,
+            ],
         ]);
     }
 

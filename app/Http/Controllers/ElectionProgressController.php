@@ -28,12 +28,13 @@ class ElectionProgressController extends Controller
             $ballotBaseQuery->where('election_id', $selectedElection->id);
         }
 
-        $scannedQuery = (clone $ballotBaseQuery)->where('status', 'scanned');
+        $scannedQuery = (clone $ballotBaseQuery)->whereIn('status', ['scanned', 'flagged']);
 
         $totalScanned = (clone $scannedQuery)->count();
         $flaggedSubmissions = (clone $scannedQuery)
             ->where(function ($query) {
-                $query->doesntHave('votes')
+                $query->whereHas('flags')
+                    ->orWhereDoesntHave('votes')
                     ->orWhereHas('votes', fn ($voteQuery) => $voteQuery->where('is_valid', false));
             })
             ->count();

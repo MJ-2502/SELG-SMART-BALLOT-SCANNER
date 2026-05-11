@@ -14,13 +14,14 @@ class ElectionTallyService
     {
         $scannedBallotsQuery = Ballot::query()
             ->where('election_id', $election->id)
-            ->where('status', 'scanned');
+            ->whereIn('status', ['scanned', 'flagged']);
 
         $totalScanned = (clone $scannedBallotsQuery)->count();
 
         $flaggedSubmissions = (clone $scannedBallotsQuery)
             ->where(function ($query) {
-                $query->doesntHave('votes')
+                $query->whereHas('flags')
+                    ->orWhereDoesntHave('votes')
                     ->orWhereHas('votes', fn ($voteQuery) => $voteQuery->where('is_valid', false));
             })
             ->count();

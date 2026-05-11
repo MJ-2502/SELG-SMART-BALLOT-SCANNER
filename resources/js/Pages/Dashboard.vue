@@ -9,7 +9,7 @@ const page = usePage();
 const user = computed(() => page.props.auth?.user ?? null);
 
 // Shape per election (from DashboardController):
-// { id, election_name, election_date, status, total_ballots, scanned_ballots }
+// { id, election_name, election_date, status, total_ballots, scanned_ballots, flagged_ballots }
 // status is one of: 'pending' | 'active' | 'completed'
 const elections = computed(() => page.props.assignedElections ?? []);
 
@@ -162,6 +162,9 @@ const isCompleted = (e) => e?.status === 'completed';
                         <div class="flex items-center justify-between mb-1">
                             <span class="text-xs text-slate-400">
                                 {{ election.scanned_ballots ?? 0 }} / {{ election.total_ballots }} ballots scanned
+                                <span v-if="election.flagged_ballots" class="ml-1 text-rose-500">
+                                    • {{ election.flagged_ballots }} flagged
+                                </span>
                             </span>
                             <span class="text-xs font-bold"
                                 :class="scanProgress(election) === 100 ? 'text-emerald-600' : 'text-indigo-600'">
@@ -262,7 +265,7 @@ const isCompleted = (e) => e?.status === 'completed';
 
                         <!-- Ballot stats — 3-column grid -->
                         <div v-if="selectedElection.total_ballots != null || selectedElection.scanned_ballots != null"
-                            class="grid grid-cols-3 gap-2">
+                            class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                             <div class="rounded-xl bg-slate-50 px-3 py-3 text-center">
                                 <p class="text-2xl font-bold text-slate-900">
                                     {{ selectedElection.total_ballots ?? '—' }}
@@ -274,6 +277,12 @@ const isCompleted = (e) => e?.status === 'completed';
                                     {{ selectedElection.scanned_ballots ?? 0 }}
                                 </p>
                                 <p class="text-xs text-emerald-600 mt-0.5">Scanned</p>
+                            </div>
+                            <div class="rounded-xl bg-rose-50 px-3 py-3 text-center">
+                                <p class="text-2xl font-bold text-rose-700">
+                                    {{ selectedElection.flagged_ballots ?? 0 }}
+                                </p>
+                                <p class="text-xs text-rose-600 mt-0.5">Flagged</p>
                             </div>
                             <div class="rounded-xl bg-amber-50 px-3 py-3 text-center">
                                 <p class="text-2xl font-bold text-amber-700">

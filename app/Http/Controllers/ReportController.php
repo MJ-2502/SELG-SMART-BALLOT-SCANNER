@@ -60,10 +60,7 @@ class ReportController extends Controller
 
         $election = Election::query()->findOrFail($validated['election_id']);
 
-        // Ensure generated_date is at least the election date (never before election occurs)
-        $generatedDate = $election->election_date && $election->election_date->isFuture()
-            ? $election->election_date
-            : now();
+        $generatedDate = now();
 
         $report = Report::query()->create([
             'election_id' => $election->id,

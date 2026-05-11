@@ -35,7 +35,7 @@ class ElectionCompletionService
 
         $scannedCount = Ballot::query()
             ->where('election_id', $election->id)
-            ->where('status', 'scanned')
+            ->whereIn('status', ['scanned', 'flagged'])
             ->count();
 
         return $scannedCount >= $expectedBallots;
@@ -66,10 +66,7 @@ class ElectionCompletionService
         $winners = $this->generateWinners($election, $summary);
         $summary['winners'] = $winners;
 
-        // Ensure generated_date is at least the election date (never before election occurs)
-        $generatedDate = $election->election_date && $election->election_date->isFuture()
-            ? $election->election_date
-            : now();
+        $generatedDate = now();
 
         // Create and save the report
         $report = Report::query()->create([
@@ -179,7 +176,7 @@ class ElectionCompletionService
         $expectedBallots = (int) ($election->ballot_print_quantity ?? 0);
         $scannedCount = Ballot::query()
             ->where('election_id', $election->id)
-            ->where('status', 'scanned')
+            ->whereIn('status', ['scanned', 'flagged'])
             ->count();
 
         $isComplete = $this->isElectionComplete($election);

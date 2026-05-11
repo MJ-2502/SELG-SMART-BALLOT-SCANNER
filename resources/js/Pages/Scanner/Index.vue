@@ -28,12 +28,15 @@ const props = defineProps({
         type: String,
         required: true,
     },
+    flagUrl: {
+        type: String,
+        required: true,
+    },
 });
 
 const page = usePage();
 const csrfToken = computed(() => page.props.csrf_token ?? document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '');
 
-const fileInput = ref(null);
 const cameraPreview = ref(null);
 const cameraStage = ref(null);
 const guideFrame = ref(null);
@@ -49,11 +52,12 @@ const detectedVotes = ref([]);
 const selectedElectionId = ref('');
 
 // ── Scan phase state machine ─────────────────────────────────────────
-// idle → scanning → validating → submitting → submitted → idle
+// idle → scanning → validating → submitting → submitted → flagged → idle
 // rescan from validating → idle (re-arms camera)
-const scanPhase = ref('idle'); // 'idle' | 'scanning' | 'validating' | 'submitting' | 'submitted'
+const scanPhase = ref('idle'); // 'idle' | 'scanning' | 'validating' | 'submitting' | 'submitted' | 'flagged'
 const validationError = ref(''); // error message shown inside the modal
 const lastSubmittedBallot = ref(null); // { ballot_number, votes_saved, ballot_id } after success
+const lastFlaggedBallot = ref(null); // { ballot_number, reason, reason_label } after success
 
 const scanState = ref('Ready.');
 const submitState = ref('Waiting for a successful scan.');
@@ -80,6 +84,21 @@ const mobileCameraActive = ref(false);
 const mobileMenuOpen = ref(false);
 const autoScanMode = ref(true);
 const capturePreviewOpen = ref(false); // shows deskewed image while OMR scan runs
+
+const flagModalOpen = ref(false);
+const flagInProgress = ref(false);
+const flagError = ref('');
+const flagReason = ref('unscannable');
+
+const flagReasonOptions = [
+    { value: 'unscannable', label: 'Unscannable (damaged)' },
+    { value: 'rules_violation', label: 'Voting rules violation' },
+];
+
+const flagReasonLabel = (reason) => {
+    const match = flagReasonOptions.find((option) => option.value === reason);
+    return match ? match.label : 'Flagged';
+};
 
 const flashSupported = ref(false);
 const flashEnabled = ref(false);
@@ -359,19 +378,6 @@ const processScan = async (base64Image) => {
     }
 };
 
-const onFileChange = () => {
-    const file = fileInput.value?.files?.[0];
-    if (!file) {
-        return;
-    }
-
-    setPreviewFromBlob(file);
-    pendingSubmission.value = null;
-    submitState.value = 'Waiting for a successful scan.';
-    setDebugOverlay(null);
-    debugBubbles.value = [];
-    debugPayload.value = null;
-};
 
 const estimateBallotAlignment = () => {
     const previewEl = cameraPreview.value;
@@ -695,6 +701,7 @@ const startAlignmentWatcher = () => {
             scanPhase.value === 'validating' ||
             scanPhase.value === 'submitting' ||
             scanPhase.value === 'submitted' ||
+            scanPhase.value === 'flagged' ||
             scanInProgress.value
         ) {
             alignmentInterval = setTimeout(tick, SLOW_MS);
@@ -860,9 +867,9 @@ const stopCamera = () => {
 const runScan = async () => {
     if (scanInProgress.value) return;
 
-    const file = capturedBlob || fileInput.value?.files?.[0];
+    const file = capturedBlob;
     if (!file) {
-        scanState.value = 'Choose or capture a ballot image first.';
+        scanState.value = 'Capture a ballot image before scanning.';
         return;
     }
 
@@ -1009,6 +1016,73 @@ const submitDetectedVotes = async () => {
     }
 };
 
+const openFlagModal = () => {
+    flagReason.value = 'unscannable';
+    flagError.value = '';
+    flagModalOpen.value = true;
+};
+
+const closeFlagModal = () => {
+    if (flagInProgress.value) return;
+    flagModalOpen.value = false;
+    flagError.value = '';
+};
+
+const submitFlag = async () => {
+    const electionId = selectedElectionId.value || props.activeElection?.id || null;
+    const ballotNo = ballotNumber.value.trim();
+
+    if (!ballotNo) {
+        flagError.value = 'Enter the ballot number before flagging.';
+        return;
+    }
+
+    if (!electionId) {
+        flagError.value = 'Select an active election before flagging.';
+        return;
+    }
+
+    flagInProgress.value = true;
+    flagError.value = '';
+
+    try {
+        const response = await fetch(props.flagUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': csrfToken.value,
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                election_id: electionId,
+                ballot_number: ballotNo,
+                reason: flagReason.value,
+            }),
+        });
+
+        const payload = await parseJsonSafely(response);
+
+        if (response.ok && payload.success) {
+            lastFlaggedBallot.value = {
+                ballot_number: payload.ballot?.ballot_number ?? ballotNo,
+                reason: flagReason.value,
+                reason_label: flagReasonLabel(flagReason.value),
+            };
+            pendingSubmission.value = null;
+            validationError.value = '';
+            flagModalOpen.value = false;
+            capturePreviewOpen.value = false;
+            scanPhase.value = 'flagged';
+        } else {
+            flagError.value = payload.message || 'Unable to flag this ballot.';
+        }
+    } catch (error) {
+        flagError.value = `Flagging failed: ${error.message}`;
+    } finally {
+        flagInProgress.value = false;
+    }
+};
+
 // Reset everything and re-arm camera for the next ballot
 const scanNextBallot = () => {
     // Auto-increment but do not go past the election's expected ballot count
@@ -1024,7 +1098,10 @@ const scanNextBallot = () => {
     pendingSubmission.value = null;
     validationError.value = '';
     lastSubmittedBallot.value = null;
+    lastFlaggedBallot.value = null;
     capturePreviewOpen.value = false;
+    flagModalOpen.value = false;
+    flagError.value = '';
     ballotNumber.value = next;
     capturedBlob = null;
     detectedVotes.value = [];
@@ -1037,7 +1114,6 @@ const scanNextBallot = () => {
     debugOverlaySrc.value = '';
     debugBubbles.value = [];
     debugPayload.value = null;
-    if (fileInput.value) fileInput.value.value = '';
     // Re-arm the alignment watcher if camera is still running
     if (cameraStream.value) startAlignmentWatcher();
 };
@@ -1047,6 +1123,8 @@ const rescanBallot = () => {
     scanPhase.value = 'idle';
     pendingSubmission.value = null;
     validationError.value = '';
+    flagModalOpen.value = false;
+    flagError.value = '';
     capturedBlob = null;
     capturePreviewOpen.value = false;
     detectedVotes.value = [];
@@ -1054,7 +1132,6 @@ const rescanBallot = () => {
     debugOverlaySrc.value = '';
     debugBubbles.value = [];
     debugPayload.value = null;
-    if (fileInput.value) fileInput.value.value = '';
     if (cameraStream.value) startAlignmentWatcher();
 };
 
@@ -1379,39 +1456,11 @@ onBeforeUnmount(() => {
                 Enter the ballot number before scanning.
             </div>
 
-            <!-- Primary scan button -->
-            <button type="button"
-                class="w-full flex items-center justify-center gap-2.5 rounded-2xl py-4 text-base font-bold text-white shadow-sm transition-colors disabled:opacity-50"
-                :class="scanInProgress ? 'bg-emerald-700' : 'bg-emerald-600 active:bg-emerald-700'"
-                :disabled="scanInProgress || ballotNumberMissing || ballotNumberOutOfRange"
-                @click="runScan">
-                <i v-if="scanInProgress" class="bi bi-arrow-repeat text-xl animate-spin leading-none" aria-hidden="true"></i>
-                <i v-else class="bi bi-upc-scan text-xl leading-none" aria-hidden="true"></i>
-                {{ scanInProgress ? 'Scanning…' : 'Scan with OMR' }}
-            </button>
-
             <!-- Scan state feedback -->
             <p v-if="scanState && scanState !== 'Ready.'" class="text-xs text-center"
                 :class="['fail','error','Error'].some(w => scanState.includes(w)) ? 'text-red-500' : 'text-slate-400'">
                 {{ scanState }}
             </p>
-
-            <!-- Upload fallback — collapsed -->
-            <details class="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
-                <summary class="flex items-center gap-2 px-4 py-3.5 text-sm font-medium text-slate-600 cursor-pointer select-none list-none active:bg-slate-50">
-                    <i class="bi bi-upload text-base text-slate-400 leading-none" aria-hidden="true"></i>
-                    Upload image instead
-                    <i class="bi bi-chevron-down text-base text-slate-400 ml-auto leading-none" aria-hidden="true"></i>
-                </summary>
-                <div class="px-4 pb-4 pt-2 border-t border-slate-100">
-                    <input ref="fileInput" type="file" accept="image/*"
-                        class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-3 file:py-2 file:text-white file:text-xs file:font-semibold"
-                        @change="onFileChange" />
-                    <div v-if="previewImageSrc" class="mt-3 rounded-xl overflow-hidden border border-slate-200">
-                        <img :src="previewImageSrc" alt="Ballot preview" class="w-full object-contain max-h-56" />
-                    </div>
-                </div>
-            </details>
 
             <!-- Calibration: top padding -->
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1458,7 +1507,7 @@ onBeforeUnmount(() => {
          Same visual style as the validation modal.
          ════════════════════════════════════════════════════════════ -->
     <Teleport to="body">
-        <div v-if="capturePreviewOpen && scanPhase !== 'validating' && scanPhase !== 'submitting' && scanPhase !== 'submitted'"
+        <div v-if="capturePreviewOpen && scanPhase !== 'validating' && scanPhase !== 'submitting' && scanPhase !== 'submitted' && scanPhase !== 'flagged'"
             class="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-0 sm:p-4"
             role="dialog" aria-modal="true">
 
@@ -1631,22 +1680,99 @@ onBeforeUnmount(() => {
                 </div>
 
                 <!-- Footer actions -->
-                <div class="flex items-center justify-between gap-3 px-5 py-4 border-t border-slate-200 bg-slate-50 flex-shrink-0">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-5 py-4 border-t border-slate-200 bg-slate-50 flex-shrink-0">
+                    <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                        <button type="button"
+                            class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            :disabled="scanPhase === 'submitting'"
+                            @click="rescanBallot">
+                            <i class="bi bi-arrow-counterclockwise text-base leading-none" aria-hidden="true"></i>
+                            Rescan
+                        </button>
+                        <button type="button"
+                            class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+                            :disabled="scanPhase === 'submitting' || flagInProgress"
+                            @click="openFlagModal">
+                            <i class="bi bi-flag-fill text-base leading-none" aria-hidden="true"></i>
+                            Flag Ballot
+                        </button>
+                    </div>
                     <button type="button"
-                        class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                        :disabled="scanPhase === 'submitting'"
-                        @click="rescanBallot">
-                        <i class="bi bi-arrow-counterclockwise text-base leading-none" aria-hidden="true"></i>
-                        Rescan
-                    </button>
-                    <button type="button"
-                        class="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-60"
+                        class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-60"
                         :class="scanPhase === 'submitting' ? 'bg-indigo-700 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'"
                         :disabled="!canSubmitBallot || scanPhase === 'submitting'"
                         @click="submitDetectedVotes">
                         <i v-if="scanPhase === 'submitting'" class="bi bi-arrow-repeat text-base animate-spin leading-none" aria-hidden="true"></i>
                         <i v-else class="bi bi-check-lg text-base leading-none" aria-hidden="true"></i>
                         {{ scanPhase === 'submitting' ? 'Submitting…' : 'Submit Ballot' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ════════════════════════════════════════════════════════════
+             FLAG MODAL — choose a reason and flag the ballot
+             ════════════════════════════════════════════════════════════ -->
+        <div v-if="flagModalOpen"
+            class="fixed inset-0 z-[98] flex items-end sm:items-center justify-center p-0 sm:p-4"
+            role="dialog" aria-modal="true" aria-labelledby="flagModalTitle">
+
+            <!-- Backdrop -->
+            <div class="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" @click="closeFlagModal"></div>
+
+            <!-- Panel -->
+            <div class="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[86dvh] overflow-hidden">
+
+                <!-- Header -->
+                <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 flex-shrink-0">
+                    <div>
+                        <h2 id="flagModalTitle" class="text-base font-semibold text-slate-900">Flag Ballot</h2>
+                        <p class="text-xs text-slate-500 mt-0.5">Ballot #<span class="font-medium text-slate-700">{{ ballotNumber || '—' }}</span></p>
+                    </div>
+                    <button type="button"
+                        class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                        :disabled="flagInProgress"
+                        @click="closeFlagModal">
+                        <i class="bi bi-x-lg text-xl leading-none" aria-hidden="true"></i>
+                    </button>
+                </div>
+
+                <!-- Body -->
+                <div class="px-5 py-4 space-y-3 overflow-y-auto">
+                    <div v-if="flagError" class="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
+                        <i class="bi bi-exclamation-circle text-base flex-shrink-0 mt-0.5 leading-none" aria-hidden="true"></i>
+                        {{ flagError }}
+                    </div>
+
+                    <div class="space-y-2">
+                        <label v-for="option in flagReasonOptions" :key="option.value"
+                            class="flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 hover:bg-slate-50">
+                            <input
+                                v-model="flagReason"
+                                type="radio"
+                                class="mt-1 rounded-full border-slate-300 text-amber-600 focus:ring-amber-500"
+                                :value="option.value"
+                            />
+                            <span class="font-medium">{{ option.label }}</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-200 bg-slate-50 flex-shrink-0">
+                    <button type="button"
+                        class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        :disabled="flagInProgress"
+                        @click="closeFlagModal">
+                        Cancel
+                    </button>
+                    <button type="button"
+                        class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+                        :disabled="flagInProgress"
+                        @click="submitFlag">
+                        <i v-if="flagInProgress" class="bi bi-arrow-repeat text-base animate-spin leading-none" aria-hidden="true"></i>
+                        <i v-else class="bi bi-flag-fill text-base leading-none" aria-hidden="true"></i>
+                        {{ flagInProgress ? 'Flagging…' : 'Confirm Flag' }}
                     </button>
                 </div>
             </div>
@@ -1697,6 +1823,62 @@ onBeforeUnmount(() => {
                 <!-- Action -->
                 <div class="px-5 pb-6 space-y-3">
                     <!-- Next ballot number preview -->
+                    <div class="flex items-center justify-between rounded-xl bg-indigo-50 border border-indigo-100 px-4 py-3">
+                        <div>
+                            <p class="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Next ballot</p>
+                            <p class="text-sm font-bold text-indigo-900 mt-0.5">
+                                #{{ nextBallotPreview }}
+                                <span class="text-xs font-normal text-indigo-400 ml-1">(auto-filled)</span>
+                            </p>
+                        </div>
+                        <i class="bi bi-arrow-right text-indigo-300 text-xl leading-none" aria-hidden="true"></i>
+                    </div>
+                    <button type="button"
+                        class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 shadow-sm"
+                        @click="scanNextBallot">
+                        <i class="bi bi-upc-scan text-base leading-none" aria-hidden="true"></i>
+                        Scan Next Ballot
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ════════════════════════════════════════════════════════════
+             FLAGGED MODAL — shown after a ballot is flagged
+             ════════════════════════════════════════════════════════════ -->
+        <div v-if="scanPhase === 'flagged' && lastFlaggedBallot"
+            class="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-0 sm:p-4"
+            role="dialog" aria-modal="true">
+
+            <!-- Backdrop -->
+            <div class="absolute inset-0 bg-slate-900/70 backdrop-blur-sm"></div>
+
+            <!-- Panel -->
+            <div class="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden">
+
+                <!-- Amber banner -->
+                <div class="bg-red-500 px-5 py-6 text-center">
+                    <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white/20">
+                        <i class="bi bi-flag-fill text-3xl text-white leading-none" aria-hidden="true"></i>
+                    </div>
+                    <h2 class="text-lg font-bold text-white">Ballot Flagged</h2>
+                    <p class="mt-1 text-sm text-red-100">The ballot remains counted, but a flag was recorded.</p>
+                </div>
+
+                <!-- Details -->
+                <div class="px-5 py-5 space-y-3">
+                    <div class="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3">
+                        <span class="text-sm text-slate-500">Ballot number</span>
+                        <span class="text-sm font-semibold text-slate-800">#{{ lastFlaggedBallot.ballot_number }}</span>
+                    </div>
+                    <div class="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3">
+                        <span class="text-sm text-slate-500">Reason</span>
+                        <span class="text-sm font-semibold text-red-700">{{ lastFlaggedBallot.reason_label }}</span>
+                    </div>
+                </div>
+
+                <!-- Action -->
+                <div class="px-5 pb-6 space-y-3">
                     <div class="flex items-center justify-between rounded-xl bg-indigo-50 border border-indigo-100 px-4 py-3">
                         <div>
                             <p class="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Next ballot</p>

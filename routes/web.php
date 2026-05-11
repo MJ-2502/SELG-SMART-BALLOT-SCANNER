@@ -44,7 +44,8 @@ Route::get('/dashboard', function () {
         })
         ->withCount([
             'ballots as total_ballots',
-            'ballots as scanned_ballots' => fn ($q) => $q->where('status', 'scanned'),
+            'ballots as scanned_ballots' => fn ($q) => $q->whereIn('status', ['scanned', 'flagged']),
+            'ballots as flagged_ballots' => fn ($q) => $q->where('status', 'flagged'),
         ])
         ->orderByDesc('election_date')
         ->get()
@@ -58,6 +59,7 @@ Route::get('/dashboard', function () {
             'status'                    => $e->status,
             'total_ballots'             => $e->total_ballots,
             'scanned_ballots'           => $e->scanned_ballots,
+            'flagged_ballots'           => $e->flagged_ballots,
         ]);
 
     return Inertia::render('Dashboard', [
@@ -108,6 +110,7 @@ Route::middleware(['auth', IsFacilitator::class])->group(function () {
     Route::get('/scanner', [ScannerController::class, 'index'])->name('scanner.index');
     Route::post('/scanner/scan', [ScannerController::class, 'scan'])->name('scanner.scan');
     Route::post('/scanner/submit', [ScannerController::class, 'submit'])->name('scanner.submit');
+    Route::post('/scanner/flag', [ScannerController::class, 'flag'])->name('scanner.flag');
 });
 
 Route::middleware('auth')->group(function () {

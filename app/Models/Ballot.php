@@ -44,4 +44,9 @@ class Ballot extends Model
     {
         return $this->hasMany(Vote::class);
     }
+
+    public function flags(): HasMany
+    {
+        return $this->hasMany(BallotFlag::class);
+    }
 }
