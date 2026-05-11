@@ -27,7 +27,7 @@ SCAN_TOP_FRAC    = 0.06
 SCAN_BOTTOM_FRAC = 0.97
 
 # Kept for the mathematical fallback
-SCAN_TOP_PAD_FRAC  = 0.1
+SCAN_TOP_PAD_FRAC  = 0.17
 SCAN_TOP_PAD_PX    = 0      
 SCAN_BOTTOM_PAD_PX = 0
 
@@ -374,25 +374,42 @@ class BallotScanner:
 
         slots: List[Dict] = []
         
-        # Calculate expected rows based on the EXACT number of candidates
-        total_expected_rows = sum(1 + len([c for c in rows[r] if not getattr(c, "is_placeholder", False)]) for r in sorted_rows)
-        use_lines = len(exact_y_centers) >= total_expected_rows
+        # Flatten the candidates into a strict top-to-bottom list
+        candidate_list = []
+        for row_idx in sorted_rows:
+            candidate_list.extend(sorted([c for c in rows[row_idx] if not getattr(c, "is_placeholder", False)], key=lambda c: c.col))
+        
+        total_expected_rows = len(candidate_list)
 
+        # ---------------------------------------------------------
+        # NEW: PURE VISUAL MAPPING (The Auto-Calibrator)
+        # If OpenCV clearly sees every single circle on the paper, 
+        # bypass all math and map them directly, top to bottom.
+        # ---------------------------------------------------------
+        # Filter out stray marks near the extreme top/bottom edges
+        valid_rings = [ry for ry in ring_ys if int(h * 0.04) < ry < int(h * 0.98)]
+        
+        if len(valid_rings) == total_expected_rows:
+            sorted_rings = sorted(valid_rings)
+            for i, cand in enumerate(candidate_list):
+                slots.append(self._create_slot_dict(cand, lane_cx, sorted_rings[i], sorted_rings[i], True))
+            return slots
+
+        # ---------------------------------------------------------
+        # FALLBACK 1: Line Centers
+        # ---------------------------------------------------------
+        use_lines = len(exact_y_centers) >= total_expected_rows
         if use_lines:
-            # OPTION 2: Physically map to the detected line centers
             center_idx = 0
             for row_idx in sorted_rows:
                 row_candidates = sorted([c for c in rows[row_idx] if not getattr(c, "is_placeholder", False)], key=lambda c: c.col)
-                
-                # Skip header row center
-                center_idx += 1 
+                center_idx += 1 # Skip header row
                 
                 for i, cand in enumerate(row_candidates):
                     if center_idx < len(exact_y_centers):
                         geom_y = exact_y_centers[center_idx]
                     else:
                         geom_y = slots[-1]["geom_y"] + int(h * 0.035) if slots else int(h * 0.2)
-                    
                     center_idx += 1
                     
                     best_ring_y, best_dist = None, int(h * 0.015)
@@ -402,33 +419,34 @@ class BallotScanner:
                             
                     final_y = best_ring_y if best_ring_y is not None else geom_y
                     final_y = int(np.clip(final_y, bubble_r, h - bubble_r))
-
                     slots.append(self._create_slot_dict(cand, lane_cx, final_y, geom_y, best_ring_y is not None))
+                    
+        # ---------------------------------------------------------
+        # FALLBACK 2: Math Fractions (if scan is blurry/missing rings)
+        # ---------------------------------------------------------
         else:
-            # FALLBACK OPTION 1: Math Fractions
             top = int(h * (SCAN_TOP_FRAC + SCAN_TOP_PAD_FRAC))
             bottom = int(h * SCAN_BOTTOM_FRAC)
             if top >= bottom: top, bottom = int(h * SCAN_TOP_FRAC), int(h * SCAN_BOTTOM_FRAC)
             scan_height = bottom - top
 
             HEADER_UNITS = 0.85  
-            
-            # Use exact lengths for total unit calculation
             total_units = sum(len([c for c in rows[r] if not getattr(c, "is_placeholder", False)]) + HEADER_UNITS for r in sorted_rows)
 
             cursor = float(top)
             for row_idx in sorted_rows:
                 row_candidates = sorted([c for c in rows[row_idx] if not getattr(c, "is_placeholder", False)], key=lambda c: c.col)
                 num_cands = len(row_candidates)
-                
                 if num_cands == 0: continue
                 
                 pos_height = scan_height * ((num_cands + HEADER_UNITS) / total_units)
                 content_top = cursor + pos_height * (HEADER_UNITS / (num_cands + HEADER_UNITS))
                 
-                # Step height is accurately divided by actual candidates
                 step_h = (pos_height - pos_height * (HEADER_UNITS / (num_cands + HEADER_UNITS))) / num_cands
-                snap_tol = int(step_h * 0.25)
+                
+                # INCREASED SNAP TOLERANCE: Allows math to be much sloppier
+                # but still magnetize to the correct circle.
+                snap_tol = int(step_h * 0.6) 
 
                 for i, cand in enumerate(row_candidates):
                     geom_y = int(np.clip(int(content_top + step_h * (i + 0.45)), bubble_r, h - bubble_r))
@@ -439,7 +457,6 @@ class BallotScanner:
                     final_y = int(np.clip(best_ring_y if best_ring_y is not None else geom_y, bubble_r, h - bubble_r))
                     slots.append(self._create_slot_dict(cand, lane_cx, final_y, geom_y, best_ring_y is not None))
                 
-                # Cursor moves down ONLY by the physical space actually used
                 cursor += pos_height
 
         return slots
