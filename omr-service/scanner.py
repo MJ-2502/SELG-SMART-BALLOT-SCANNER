@@ -27,7 +27,7 @@ SCAN_TOP_FRAC    = 0.06
 SCAN_BOTTOM_FRAC = 0.97
 
 # Kept for the mathematical fallback
-SCAN_TOP_PAD_FRAC  = 0.17
+SCAN_TOP_PAD_FRAC  = 0.15
 SCAN_TOP_PAD_PX    = 0      
 SCAN_BOTTOM_PAD_PX = 0
 
@@ -56,8 +56,11 @@ class BallotScanner:
         self,
         image_base64: str,
         bubble_candidates: List[BubbleCandidate],
+        scan_top_pad_frac: Optional[float] = None,
     ) -> ScanResponse:
         t0 = time.time()
+
+        top_pad_frac = self._normalize_top_pad_frac(scan_top_pad_frac)
 
         if not self._load_base64(image_base64):
             return self._error_response("Failed to load image", t0)
@@ -68,7 +71,7 @@ class BallotScanner:
         self.image = self._preprocess(self.image)
         self.processed_preview_image = self._encode_jpg(self.image)
 
-        detected = self._detect_bubbles(bubble_candidates)
+        detected = self._detect_bubbles(bubble_candidates, top_pad_frac)
 
         self.debug_visualization_image = self._build_debug_overlay(
             self.image, self.debug_bubbles
@@ -94,6 +97,17 @@ class BallotScanner:
     # Step 1 & 2: Preprocessing
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _normalize_top_pad_frac(value: Optional[float]) -> float:
+        if value is None:
+            return SCAN_TOP_PAD_FRAC
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return SCAN_TOP_PAD_FRAC
+
+        return float(np.clip(numeric, 0.0, 0.35))
+
     def _load_base64(self, b64: str) -> bool:
         try:
             if "," in b64:
@@ -115,79 +129,47 @@ class BallotScanner:
         return img
 
     def _warp_to_ballot(self, img: np.ndarray) -> np.ndarray:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # 1. FIX: Use Adaptive Thresholding to cut through shadows and uneven lighting
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 51, 15)
+        h, w = img.shape[:2]
+        area = h * w
 
-        # 2. CRITICAL FIX: Use RETR_LIST instead of RETR_EXTERNAL
-        # This forces OpenCV to look INSIDE the paper for the squares, rather than just the paper edge
-        contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        
-        markers = []
-        img_area = img.shape[0] * img.shape[1]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blur, 50, 150)
+        edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
+
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:8]
 
         for cnt in contours:
-            area = cv2.contourArea(cnt)
-            
-            # The squares should be relatively small compared to the whole page
-            if img_area * 0.0005 < area < img_area * 0.02: 
-                peri = cv2.arcLength(cnt, True)
-                # Loosened approximation slightly to account for ink bleeding or blurry photos
-                approx = cv2.approxPolyDP(cnt, 0.05 * peri, True)
-                
-                # Loosened corners check (4 to 6) because printed corners often round off
-                if 4 <= len(approx) <= 6:
-                    x, y, w, h = cv2.boundingRect(approx)
-                    aspect_ratio = float(w) / h
-                    
-                    if 0.75 <= aspect_ratio <= 1.3:
-                        hull = cv2.convexHull(cnt)
-                        solidity = float(area) / cv2.contourArea(hull) if cv2.contourArea(hull) > 0 else 0
-                        
-                        if solidity > 0.85:
-                            M = cv2.moments(cnt)
-                            if M["m00"] != 0:
-                                cx = int(M["m10"] / M["m00"])
-                                cy = int(M["m01"] / M["m00"])
-                                markers.append([cx, cy])
+            if cv2.contourArea(cnt) < area * 0.15:
+                break
+            peri = cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+            if len(approx) != 4:
+                continue
 
-        # If we found exactly 4 markers, warp based on them!
-        if len(markers) == 4:
-            pts = np.array(markers, dtype="float32")
-            
-            # Sort the 4 points: Top-Left, Top-Right, Bottom-Right, Bottom-Left
-            s = pts.sum(axis=1)
-            diff = np.diff(pts, axis=1)
-            rect = np.zeros((4, 2), dtype="float32")
-            rect[0] = pts[np.argmin(s)]       # Top-Left
-            rect[2] = pts[np.argmax(s)]       # Bottom-Right
-            rect[1] = pts[np.argmin(diff)]    # Top-Right
-            rect[3] = pts[np.argmax(diff)]    # Bottom-Left
+            pts = approx.reshape(4, 2).astype("float32")
+            rect = self._order_points(pts)
 
-            width_A = np.sqrt(((rect[2][0] - rect[3][0]) ** 2) + ((rect[2][1] - rect[3][1]) ** 2))
-            width_B = np.sqrt(((rect[1][0] - rect[0][0]) ** 2) + ((rect[1][1] - rect[0][1]) ** 2))
-            max_width = max(int(width_A), int(width_B))
+            wa = float(np.linalg.norm(rect[1] - rect[0]))
+            wb = float(np.linalg.norm(rect[2] - rect[3]))
+            ha = float(np.linalg.norm(rect[3] - rect[0]))
+            hb = float(np.linalg.norm(rect[2] - rect[1]))
+            tw, th = int(max(wa, wb)), int(max(ha, hb))
 
-            height_A = np.sqrt(((rect[1][0] - rect[2][0]) ** 2) + ((rect[1][1] - rect[2][1]) ** 2))
-            height_B = np.sqrt(((rect[0][0] - rect[3][0]) ** 2) + ((rect[0][1] - rect[3][1]) ** 2))
-            max_height = max(int(height_A), int(height_B))
+            if tw < w * 0.25 or th < h * 0.25:
+                continue
 
-            dst = np.array([
-                [0, 0],
-                [max_width - 1, 0],
-                [max_width - 1, max_height - 1],
-                [0, max_height - 1]
-            ], dtype="float32")
+            ar = tw / max(1, th)
+            if not (0.20 <= ar <= 2.0):
+                continue
 
+            dst = np.array([[0, 0], [tw - 1, 0], [tw - 1, th - 1], [0, th - 1]], dtype="float32")
             M = cv2.getPerspectiveTransform(rect, dst)
-            warped = cv2.warpPerspective(img, M, (max_width, max_height))
-            return warped
+            return cv2.warpPerspective(img, M, (tw, th))
 
-        # FALLBACK: If it still misses a square, return original image
         return img
-    
+
     def _deskew(self, img: np.ndarray) -> np.ndarray:
         h, w = img.shape[:2]
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -286,7 +268,7 @@ class BallotScanner:
     # Step 3: Bubble detection
     # ------------------------------------------------------------------
 
-    def _detect_bubbles(self, candidates: List[BubbleCandidate]) -> List[DetectedVote]:
+    def _detect_bubbles(self, candidates: List[BubbleCandidate], scan_top_pad_frac: float) -> List[DetectedVote]:
         if not candidates:
             return []
 
@@ -299,16 +281,23 @@ class BallotScanner:
             gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block, 8
         )
 
-        lane_cx = self._estimate_lane_cx(gray, w, h, bubble_r)
+        lane_cx = self._estimate_lane_cx(gray, w, h, bubble_r, scan_top_pad_frac)
         
         # NEW: Find the exact physical rows based on lines
         exact_y_centers = self._find_row_centers_via_lines(gray, w, h)
 
         expected_slots = sum(1 for c in candidates if not getattr(c, "is_placeholder", False))
-        ring_ys = self._detect_ring_ys(gray, w, h, bubble_r, lane_cx, expected_slots)
+        ring_ys = self._detect_ring_ys(gray, w, h, bubble_r, lane_cx, expected_slots, scan_top_pad_frac)
 
         slot_measurements = self._assign_slots(
-            candidates, ring_ys, h, w, bubble_r, lane_cx, exact_y_centers
+            candidates,
+            ring_ys,
+            h,
+            w,
+            bubble_r,
+            lane_cx,
+            exact_y_centers,
+            scan_top_pad_frac,
         )
 
         self.debug_bubbles = []
@@ -320,9 +309,9 @@ class BallotScanner:
 
         return self._select_winners(slot_measurements)
 
-    def _estimate_lane_cx(self, gray: np.ndarray, w: int, h: int, bubble_r: int) -> int:
+    def _estimate_lane_cx(self, gray: np.ndarray, w: int, h: int, bubble_r: int, scan_top_pad_frac: float) -> int:
         default_cx, lane_right = int(w * 0.07), int(w * 0.12)
-        top = int(h * (SCAN_TOP_FRAC + SCAN_TOP_PAD_FRAC))
+        top = int(h * (SCAN_TOP_FRAC + scan_top_pad_frac))
         bottom = int(h * SCAN_BOTTOM_FRAC)
         if top >= bottom: top = int(h * SCAN_TOP_FRAC)
         
@@ -343,8 +332,8 @@ class BallotScanner:
         peak_x = int(np.argmax(col_smooth))
         return max(bubble_r, min(lane_right - bubble_r, peak_x))
 
-    def _detect_ring_ys(self, gray: np.ndarray, w: int, h: int, bubble_r: int, lane_cx: int, expected_count: Optional[int] = None) -> List[int]:
-        top = int(h * (SCAN_TOP_FRAC + SCAN_TOP_PAD_FRAC))
+    def _detect_ring_ys(self, gray: np.ndarray, w: int, h: int, bubble_r: int, lane_cx: int, expected_count: Optional[int] = None, scan_top_pad_frac: float = SCAN_TOP_PAD_FRAC) -> List[int]:
+        top = int(h * (SCAN_TOP_FRAC + scan_top_pad_frac))
         bottom = int(h * SCAN_BOTTOM_FRAC)
         if top >= bottom: top = int(h * SCAN_TOP_FRAC)
         half_lane = max(bubble_r + 4, int(w * 0.025))
@@ -398,7 +387,7 @@ class BallotScanner:
             if score < best_score: best_score, best_i = score, i
         return ring_ys[best_i:best_i + count]
 
-    def _assign_slots(self, candidates: List[BubbleCandidate], ring_ys: List[int], h: int, w: int, bubble_r: int, lane_cx: int, exact_y_centers: List[int]) -> List[Dict]:
+    def _assign_slots(self, candidates: List[BubbleCandidate], ring_ys: List[int], h: int, w: int, bubble_r: int, lane_cx: int, exact_y_centers: List[int], scan_top_pad_frac: float) -> List[Dict]:
         rows: Dict[int, List[BubbleCandidate]] = {}
         for c in candidates: rows.setdefault(c.row, []).append(c)
         sorted_rows = sorted(rows.keys())
@@ -438,7 +427,7 @@ class BallotScanner:
                     slots.append(self._create_slot_dict(cand, lane_cx, final_y, geom_y, best_ring_y is not None))
         else:
             # FALLBACK OPTION 1: Math Fractions
-            top = int(h * (SCAN_TOP_FRAC + SCAN_TOP_PAD_FRAC))
+            top = int(h * (SCAN_TOP_FRAC + scan_top_pad_frac))
             bottom = int(h * SCAN_BOTTOM_FRAC)
             if top >= bottom: top, bottom = int(h * SCAN_TOP_FRAC), int(h * SCAN_BOTTOM_FRAC)
             scan_height = bottom - top

@@ -42,6 +42,7 @@ const analysisCanvas = ref(null);
 
 const ballotNumber = ref('');
 const debugMode = ref(false);
+const scanTopPadFrac = ref(0.15);
 
 const resultJsonText = ref('No scan yet.');
 const detectedVotes = ref([]);
@@ -162,6 +163,13 @@ const clearObjectUrl = (kind) => {
         URL.revokeObjectURL(debugObjectUrl);
         debugObjectUrl = null;
     }
+};
+
+const normalizeTopPadFrac = (value) => {
+    if (value === '' || value === null || value === undefined) return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    return Math.min(0.35, Math.max(0, numeric));
 };
 
 const setGuideVisualState = (state) => {
@@ -868,6 +876,8 @@ const runScan = async () => {
     formData.append('ballot_image', file, file.name || 'ballot.jpg');
     if (selectedElectionId.value) formData.append('election_id', selectedElectionId.value);
     if (ballotNumber.value.trim()) formData.append('ballot_number', ballotNumber.value.trim());
+    const topPad = normalizeTopPadFrac(scanTopPadFrac.value);
+    if (topPad !== null) formData.append('scan_top_pad_frac', topPad.toFixed(3));
 
     scanState.value = 'Sending image to OMR service...';
 
@@ -984,7 +994,7 @@ const submitDetectedVotes = async () => {
         } else {
             // Map known error codes to human-readable messages
             if (response.status === 409) {
-                validationError.value = 'This ballot was already submitted. Scan the next ballot.';
+                validationError.value = payload.message || 'This ballot was already submitted. Scan the next ballot.';
             } else if (response.status === 422) {
                 const errors = payload.errors?.join(' ') || payload.message;
                 validationError.value = errors || 'Validation failed. Please rescan.';
@@ -1402,6 +1412,36 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
             </details>
+
+            <!-- Calibration: top padding -->
+            <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div class="flex items-center justify-between gap-2">
+                    <label class="text-sm font-semibold text-slate-700">Calibration: Top padding</label>
+                    <span class="text-xs text-slate-400">Default 0.15</span>
+                </div>
+                <div class="mt-3 flex items-center gap-3">
+                    <input
+                        v-model="scanTopPadFrac"
+                        type="number"
+                        min="0"
+                        max="0.35"
+                        step="0.01"
+                        inputmode="decimal"
+                        class="w-24 rounded-lg border-slate-300 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    />
+                    <input
+                        v-model="scanTopPadFrac"
+                        type="range"
+                        min="0"
+                        max="0.35"
+                        step="0.01"
+                        class="flex-1 accent-indigo-500"
+                    />
+                </div>
+                <p class="mt-2 text-xs text-slate-400">
+                    Adjusts the top crop used when locating rows (higher = skip more header area).
+                </p>
+            </div>
 
             <!-- Debug -->
             <label class="inline-flex items-center gap-2 text-xs text-slate-400 cursor-pointer px-1">

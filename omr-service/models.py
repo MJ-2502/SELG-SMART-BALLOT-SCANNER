@@ -24,6 +24,12 @@ class ScanRequest(BaseModel):
     ballot_layout: List[BubbleCandidate] = Field(..., description="Bubble to candidate mapping for this ballot")
     election_id: Optional[int] = Field(None, description="Election ID for tracking")
     ballot_number: Optional[str] = Field(None, description="Unique ballot number for reference")
+    scan_top_pad_frac: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=0.35,
+        description="Optional top padding fraction override for scanning",
+    )
 
 
 class DetectedVote(BaseModel):

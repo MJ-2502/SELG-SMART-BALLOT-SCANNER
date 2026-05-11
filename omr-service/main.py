@@ -73,7 +73,11 @@ async def scan_ballot(
             raise HTTPException(status_code=400, detail="No ballot layout provided")
         
         # Perform scan
-        response = scanner.scan(request.ballot_image_base64, request.ballot_layout)
+        response = scanner.scan(
+            request.ballot_image_base64,
+            request.ballot_layout,
+            scan_top_pad_frac=request.scan_top_pad_frac,
+        )
         
         # Conditionally include debug data based on query parameters
         if not include_debug_image:

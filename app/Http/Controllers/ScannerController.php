@@ -88,6 +88,7 @@ class ScannerController extends Controller
             'ballot_image' => ['required', 'file', 'image', 'max:10240'],
             'election_id' => ['nullable', 'integer', 'exists:elections,id'],
             'ballot_number' => ['nullable', 'string', 'max:255'],
+            'scan_top_pad_frac' => ['nullable', 'numeric', 'min:0', 'max:0.35'],
         ]);
 
         if (! empty($validated['election_id']) && ! $this->canScanElection((int) $validated['election_id'])) {
@@ -154,6 +155,7 @@ class ScannerController extends Controller
             'ballot_layout' => $ballotLayout->values()->all(),
             'election_id' => $validated['election_id'] ?? null,
             'ballot_number' => $validated['ballot_number'] ?? null,
+            'scan_top_pad_frac' => $validated['scan_top_pad_frac'] ?? null,
         ];
 
         $serviceUrl = rtrim((string) config('omr.service_url'), '/');
@@ -343,11 +345,28 @@ class ScannerController extends Controller
             }
         }
 
+        $existingBallotQuery = Ballot::query();
+        if (! empty($validated['ballot_id'])) {
+            $existingBallotQuery->where('id', $validated['ballot_id']);
+        } else {
+            $existingBallotQuery->where('election_id', $validated['election_id'] ?? null)
+                ->where('ballot_number', $validated['ballot_number'] ?? null);
+        }
+
+        $existingBallot = $existingBallotQuery->first();
+        if ($existingBallot && ($existingBallot->status === 'scanned' || $existingBallot->votes()->exists())) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This ballot has already been submitted. Please scan the next ballot.',
+                'errors' => ['Duplicate ballot submission detected.'],
+            ], 409);
+        }
+
         if (Ballot::query()->where('image_hash', $validated['image_hash'])->exists()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Duplicate ballot detected. This scan was already submitted.',
-                'errors' => ['Duplicate image hash.'],
+                'message' => 'This ballot has already been submitted. Please scan the next ballot.',
+                'errors' => ['Duplicate image hash detected.'],
             ], 409);
         }
 
