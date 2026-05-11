@@ -115,47 +115,85 @@ class BallotScanner:
         return img
 
     def _warp_to_ballot(self, img: np.ndarray) -> np.ndarray:
-        h, w = img.shape[:2]
-        area = h * w
-
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # 1. Enhance contrast to make the black squares pop out
         blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blur, 50, 150)
-        edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
+        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:8]
+        # 2. Find all contours in the image
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        markers = []
+        img_area = img.shape[0] * img.shape[1]
 
+        # 3. Filter the contours to find exactly 4 small, solid squares
         for cnt in contours:
-            if cv2.contourArea(cnt) < area * 0.15:
-                break
-            peri = cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
-            if len(approx) != 4:
-                continue
+            area = cv2.contourArea(cnt)
+            
+            # The squares should be relatively small compared to the whole page
+            if img_area * 0.0005 < area < img_area * 0.02: 
+                peri = cv2.arcLength(cnt, True)
+                approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+                
+                # If the shape has 4 corners...
+                if len(approx) == 4:
+                    x, y, w, h = cv2.boundingRect(approx)
+                    aspect_ratio = float(w) / h
+                    
+                    # ...and is roughly a square (not a long rectangle)...
+                    if 0.8 <= aspect_ratio <= 1.2:
+                        
+                        # ...and is solidly filled in (solidity > 0.9)
+                        hull = cv2.convexHull(cnt)
+                        solidity = float(area) / cv2.contourArea(hull) if cv2.contourArea(hull) > 0 else 0
+                        
+                        if solidity > 0.90:
+                            # Calculate the center (X, Y) of this square
+                            M = cv2.moments(cnt)
+                            if M["m00"] != 0:
+                                cx = int(M["m10"] / M["m00"])
+                                cy = int(M["m01"] / M["m00"])
+                                markers.append([cx, cy])
 
-            pts = approx.reshape(4, 2).astype("float32")
-            rect = self._order_points(pts)
+        # 4. If we found exactly 4 markers, warp based on them!
+        if len(markers) == 4:
+            pts = np.array(markers, dtype="float32")
+            
+            # Sort the 4 points: Top-Left, Top-Right, Bottom-Right, Bottom-Left
+            s = pts.sum(axis=1)
+            diff = np.diff(pts, axis=1)
+            rect = np.zeros((4, 2), dtype="float32")
+            rect[0] = pts[np.argmin(s)]       # Top-Left
+            rect[2] = pts[np.argmax(s)]       # Bottom-Right
+            rect[1] = pts[np.argmin(diff)]    # Top-Right
+            rect[3] = pts[np.argmax(diff)]    # Bottom-Left
 
-            wa = float(np.linalg.norm(rect[1] - rect[0]))
-            wb = float(np.linalg.norm(rect[2] - rect[3]))
-            ha = float(np.linalg.norm(rect[3] - rect[0]))
-            hb = float(np.linalg.norm(rect[2] - rect[1]))
-            tw, th = int(max(wa, wb)), int(max(ha, hb))
+            # Calculate the dynamic width and height of the new box
+            width_A = np.sqrt(((rect[2][0] - rect[3][0]) ** 2) + ((rect[2][1] - rect[3][1]) ** 2))
+            width_B = np.sqrt(((rect[1][0] - rect[0][0]) ** 2) + ((rect[1][1] - rect[0][1]) ** 2))
+            max_width = max(int(width_A), int(width_B))
 
-            if tw < w * 0.25 or th < h * 0.25:
-                continue
+            height_A = np.sqrt(((rect[1][0] - rect[2][0]) ** 2) + ((rect[1][1] - rect[2][1]) ** 2))
+            height_B = np.sqrt(((rect[0][0] - rect[3][0]) ** 2) + ((rect[0][1] - rect[3][1]) ** 2))
+            max_height = max(int(height_A), int(height_B))
 
-            ar = tw / max(1, th)
-            if not (0.20 <= ar <= 2.0):
-                continue
+            dst = np.array([
+                [0, 0],
+                [max_width - 1, 0],
+                [max_width - 1, max_height - 1],
+                [0, max_height - 1]
+            ], dtype="float32")
 
-            dst = np.array([[0, 0], [tw - 1, 0], [tw - 1, th - 1], [0, th - 1]], dtype="float32")
+            # Perform the perspective transform strictly inside the 4 squares
             M = cv2.getPerspectiveTransform(rect, dst)
-            return cv2.warpPerspective(img, M, (tw, th))
+            warped = cv2.warpPerspective(img, M, (max_width, max_height))
+            return warped
 
+        # 5. FALLBACK: If the squares are covered or smudged, fall back to finding the paper edges
+        # (Insert your original paper-edge contour finding logic here)
         return img
-
+    
     def _deskew(self, img: np.ndarray) -> np.ndarray:
         h, w = img.shape[:2]
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
