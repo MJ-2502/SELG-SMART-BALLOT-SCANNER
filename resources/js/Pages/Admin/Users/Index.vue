@@ -106,7 +106,7 @@ const confirmDelete = () => window.confirm('Delete this facilitator? This action
                                         class="ui-btn-secondary ui-btn-sm !px-2.5"
                                         title="View details"
                                     >
-                                        <i>Details</i>
+                                        <i class="bi bi-eye"></i>
                                     </button>
 
                                     <Link
