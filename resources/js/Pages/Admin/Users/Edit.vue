@@ -1,4 +1,5 @@
 <script setup>
+import { ref } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
@@ -15,6 +16,9 @@ const form = useForm({
     password: '',
     password_confirmation: '',
 });
+
+const showPassword = ref(false);
+const showConfirmPassword = ref(false);
 </script>
 
 <template>
@@ -76,14 +80,42 @@ const form = useForm({
 
                         <div>
                             <label class="block text-sm font-medium mb-1 text-slate-700">Password</label>
-                            <input v-model="form.password" type="password" class="ui-input" />
+                            <div class="relative">
+                                <input v-model="form.password" :type="showPassword ? 'text' : 'password'" class="ui-input pr-10" />
+                                <button
+                                    type="button"
+                                    class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-500 hover:text-slate-900"
+                                    @click="showPassword = !showPassword"
+                                >
+                                    <span class="sr-only">{{ showPassword ? 'Hide' : 'Show' }} password</span>
+                                    <i
+                                        :class="showPassword ? 'bi bi-eye-slash' : 'bi bi-eye'"
+                                        class="text-lg leading-none"
+                                        aria-hidden="true"
+                                    ></i>
+                                </button>
+                            </div>
                             <p class="text-xs text-gray-500 mt-1">Leave blank to keep current password.</p>
                             <p v-if="form.errors.password" class="mt-1 text-sm text-red-600">{{ form.errors.password }}</p>
                         </div>
 
                         <div>
                             <label class="block text-sm font-medium mb-1 text-slate-700">Confirm Password</label>
-                            <input v-model="form.password_confirmation" type="password" class="ui-input" />
+                            <div class="relative">
+                                <input v-model="form.password_confirmation" :type="showConfirmPassword ? 'text' : 'password'" class="ui-input pr-10" />
+                                <button
+                                    type="button"
+                                    class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-500 hover:text-slate-900"
+                                    @click="showConfirmPassword = !showConfirmPassword"
+                                >
+                                    <span class="sr-only">{{ showConfirmPassword ? 'Hide' : 'Show' }} confirm password</span>
+                                    <i
+                                        :class="showConfirmPassword ? 'bi bi-eye-slash' : 'bi bi-eye'"
+                                        class="text-lg leading-none"
+                                        aria-hidden="true"
+                                    ></i>
+                                </button>
+                            </div>
                         </div>
 
                     </div>

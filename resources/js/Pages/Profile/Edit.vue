@@ -1,4 +1,5 @@
 <script setup>
+import { ref } from 'vue';
 import { Head, useForm, usePage } from '@inertiajs/vue3';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
@@ -23,6 +24,10 @@ const passwordForm = useForm({
     password: '',
     password_confirmation: '',
 });
+
+const showCurrentPassword = ref(false);
+const showNewPassword = ref(false);
+const showConfirmPassword = ref(false);
 
 const deleteForm = useForm({
     password: '',
@@ -89,19 +94,77 @@ function updatePassword() {
                 <form class="space-y-4" @submit.prevent="updatePassword">
                     <div>
                         <label class="block text-sm font-medium mb-1">Current Password</label>
-                        <input v-model="passwordForm.current_password" type="password" class="ui-input" required />
+                        <div class="relative">
+                            <input
+                                v-model="passwordForm.current_password"
+                                :type="showCurrentPassword ? 'text' : 'password'"
+                                class="ui-input pr-10"
+                                required
+                            />
+                            <button
+                                type="button"
+                                class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-500 hover:text-slate-900"
+                                @click="showCurrentPassword = !showCurrentPassword"
+                            >
+                                <span class="sr-only">{{ showCurrentPassword ? 'Hide' : 'Show' }} current password</span>
+                                <i
+                                    :class="showCurrentPassword ? 'bi bi-eye-slash' : 'bi bi-eye'"
+                                    class="text-lg leading-none"
+                                    aria-hidden="true"
+                                ></i>
+                            </button>
+                        </div>
                         <p v-if="passwordForm.errors.current_password" class="mt-1 text-sm text-red-600">{{ passwordForm.errors.current_password }}</p>
                     </div>
 
                     <div>
                         <label class="block text-sm font-medium mb-1">New Password</label>
-                        <input v-model="passwordForm.password" type="password" class="ui-input" required />
+                        <div class="relative">
+                            <input
+                                v-model="passwordForm.password"
+                                :type="showNewPassword ? 'text' : 'password'"
+                                class="ui-input pr-10"
+                                required
+                            />
+                            <button
+                                type="button"
+                                class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-500 hover:text-slate-900"
+                                @click="showNewPassword = !showNewPassword"
+                            >
+                                <span class="sr-only">{{ showNewPassword ? 'Hide' : 'Show' }} new password</span>
+                                <i
+                                    :class="showNewPassword ? 'bi bi-eye-slash' : 'bi bi-eye'"
+                                    class="text-lg leading-none"
+                                    aria-hidden="true"
+                                ></i>
+                            </button>
+                        </div>
                         <p v-if="passwordForm.errors.password" class="mt-1 text-sm text-red-600">{{ passwordForm.errors.password }}</p>
                     </div>
 
                     <div>
                         <label class="block text-sm font-medium mb-1">Confirm New Password</label>
-                        <input v-model="passwordForm.password_confirmation" type="password" class="ui-input" required />
+                        <div class="relative">
+                            <input
+                                v-model="passwordForm.password_confirmation"
+                                :type="showConfirmPassword ? 'text' : 'password'"
+                                class="ui-input pr-10"
+                                required
+                            />
+                            <button
+                                type="button"
+                                class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-500 hover:text-slate-900"
+                                @click="showConfirmPassword = !showConfirmPassword"
+                            >
+                                <span class="sr-only">{{ showConfirmPassword ? 'Hide' : 'Show' }} confirm password</span>
+                                <i
+                                    :class="showConfirmPassword ? 'bi bi-eye-slash' : 'bi bi-eye'"
+                                    class="text-lg leading-none"
+                                    aria-hidden="true"
+                                ></i>
+                            </button>
+                        </div>
+                        <p v-if="passwordForm.errors.password" class="mt-1 text-sm text-red-600">{{ passwordForm.errors.password }}</p>
                     </div>
 
                     <p v-if="status === 'password-updated'" class="text-sm text-emerald-700">Password updated successfully.</p>
