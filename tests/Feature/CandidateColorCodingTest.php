@@ -66,7 +66,7 @@ class CandidateColorCodingTest extends TestCase
         $response->assertRedirect(route('candidates.index'));
         $this->assertDatabaseHas('candidates', [
             'name' => 'Alpha Two',
-            'party' => 'Alpha',
+            'party' => 'ALPHA',
             'color_code' => '#0EA5E9',
         ]);
     }

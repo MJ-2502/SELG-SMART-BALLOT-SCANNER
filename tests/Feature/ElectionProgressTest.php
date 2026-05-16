@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Vote;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 class ElectionProgressTest extends TestCase
@@ -83,24 +84,24 @@ class ElectionProgressTest extends TestCase
             'scanned_by' => $adviser->id,
         ]);
 
-        $response = $this->actingAs($adviser)->get(route('admin.progress', [
+        $response = $this->actingAs($adviser)->get(route('admin.dashboard', [
             'election' => $election->id,
         ]));
 
         $response->assertOk();
-        $response->assertViewHas('metrics', function (array $metrics): bool {
-            return $metrics['total_scanned'] === 2
-                && $metrics['valid_submissions'] === 1
-                && $metrics['flagged_submissions'] === 1;
-        });
-        $response->assertSee('Election Progress Monitoring');
+        $response->assertInertia(fn (Assert $page) => $page
+            ->component('Admin/Dashboard')
+            ->where('stats.ballots_scanned', 2)
+            ->where('stats.valid_ballots', 1)
+            ->where('stats.invalid_ballots', 1)
+        );
     }
 
     public function test_facilitator_cannot_access_election_progress_page(): void
     {
         $facilitator = User::factory()->create(['role' => User::ROLE_FACILITATOR]);
 
-        $response = $this->actingAs($facilitator)->get(route('admin.progress'));
+        $response = $this->actingAs($facilitator)->get(route('admin.dashboard'));
 
         $response->assertForbidden();
     }

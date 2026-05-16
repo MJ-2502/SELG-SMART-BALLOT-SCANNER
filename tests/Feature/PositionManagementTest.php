@@ -19,6 +19,7 @@ class PositionManagementTest extends TestCase
             'name' => 'President',
             'display_order' => 1,
             'votes_allowed' => 1,
+            'max_candidates_per_party' => 1,
         ]);
 
         $createResponse->assertRedirect(route('positions.index'));
@@ -30,6 +31,7 @@ class PositionManagementTest extends TestCase
             'name' => 'Vice President',
             'display_order' => 2,
             'votes_allowed' => 2,
+            'max_candidates_per_party' => 2,
         ]);
 
         $updateResponse->assertRedirect(route('positions.index'));

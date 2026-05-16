@@ -44,6 +44,7 @@ class CandidateRegistrationGuardTest extends TestCase
             'position_id' => $position->id,
             'name' => 'Jane Doe',
             'party' => 'Unity',
+            'color_code' => '#0EA5E9',
             'is_active' => 1,
         ]);
 

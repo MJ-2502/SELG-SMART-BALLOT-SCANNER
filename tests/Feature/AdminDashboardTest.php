@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Vote;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 class AdminDashboardTest extends TestCase
@@ -25,8 +26,14 @@ class AdminDashboardTest extends TestCase
         $response = $this->actingAs($adviser)->get(route('admin.dashboard'));
 
         $response->assertOk();
-        $response->assertSee('Welcome to SELG Ballot Scanner');
-        $response->assertSee('Start / Create Election');
+        $response->assertInertia(fn (Assert $page) => $page
+            ->component('Admin/Dashboard')
+            ->where('hasElection', false)
+            ->where('selectedElection', null)
+            ->where('stats.total_positions', 0)
+            ->where('stats.total_candidates', 0)
+            ->where('availableElections', [])
+        );
     }
 
     public function test_adviser_with_election_sees_monitoring_cards(): void
@@ -86,10 +93,16 @@ class AdminDashboardTest extends TestCase
         $response = $this->actingAs($adviser)->get(route('admin.dashboard'));
 
         $response->assertOk();
-        $response->assertSee('Dashboard');
-        $response->assertSee('Ballots Scanned');
-        $response->assertSee('Valid Ballots');
-        $response->assertSee('Invalid Ballots');
-        $response->assertSee('Voter Turnout');
+        $response->assertInertia(fn (Assert $page) => $page
+            ->component('Admin/Dashboard')
+            ->where('hasElection', true)
+            ->where('selectedElection.id', $election->id)
+            ->where('stats.total_positions', 1)
+            ->where('stats.total_candidates', 1)
+            ->where('stats.ballots_scanned', 2)
+            ->where('stats.valid_ballots', 1)
+            ->where('stats.invalid_ballots', 1)
+            ->where('stats.voter_turnout', 100)
+        );
     }
 }

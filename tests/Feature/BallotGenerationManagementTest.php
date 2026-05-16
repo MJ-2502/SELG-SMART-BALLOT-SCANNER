@@ -43,7 +43,7 @@ class BallotGenerationManagementTest extends TestCase
             'print_count' => 3,
         ]);
 
-        $response->assertRedirect(route('admin.ballot-generator.print', [
+        $response->assertRedirect(route('admin.ballot-management.print', [
             'election' => $election->id,
             'per_sheet' => 2,
             'scale_percent' => 100,
@@ -57,7 +57,7 @@ class BallotGenerationManagementTest extends TestCase
         ]);
     }
 
-    public function test_adviser_cannot_generate_ballots_without_partylist_entries(): void
+    public function test_adviser_can_generate_ballots_without_partylist_entries(): void
     {
         $this->actingAsAdviser();
 
@@ -85,12 +85,18 @@ class BallotGenerationManagementTest extends TestCase
             'print_count' => 3,
         ]);
 
-        $response->assertRedirect(route('admin.ballot-generator.index', ['election' => $election->id], false));
-        $response->assertSessionHasErrors([
-            'target_election' => 'Before generating ballots for this election, add active partylist first in Candidate Management.',
-        ]);
+        $response->assertRedirect(route('admin.ballot-management.print', [
+            'election' => $election->id,
+            'per_sheet' => 2,
+            'scale_percent' => 100,
+        ], false));
+        $response->assertSessionHas('status');
 
-        $this->assertDatabaseCount('ballots', 0);
+        $this->assertDatabaseCount('ballots', 3);
+        $this->assertDatabaseHas('elections', [
+            'id' => $election->id,
+            'ballot_print_quantity' => 3,
+        ]);
     }
 
     public function test_adviser_can_delete_pending_ballot_from_finished_election(): void

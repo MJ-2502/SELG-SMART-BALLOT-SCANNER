@@ -27,7 +27,9 @@ class ElectionTallyService
             ->count();
 
         $validSubmissions = max(0, $totalScanned - $flaggedSubmissions);
-        $expectedBallots = max(0, (int) ($election->ballot_print_quantity ?? 0));
+        $expectedBallots = Ballot::query()
+            ->where('election_id', $election->id)
+            ->count();
         $turnout = $expectedBallots > 0
             ? (int) round(($totalScanned / $expectedBallots) * 100)
             : 0;

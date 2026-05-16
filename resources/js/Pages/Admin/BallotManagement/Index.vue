@@ -16,16 +16,7 @@ const generatorForm = useForm({
 
 const confirmDelete = () => window.confirm('Delete this ballot?');
 
-const isLocked = (ballot) => {
-    if (!props.selectedElection) {
-        return true;
-    }
-
-    const finished = props.selectedElection.status === 'completed';
-    const pendingNoVotes = ballot.status === 'pending' && Number(ballot.votes_count) === 0;
-
-    return !(finished && pendingNoVotes);
-};
+const isLocked = (ballot) => ballot.status === 'scanned';
 
 const submitGeneratorForm = () => {
     generatorForm.post('/admin/ballot-generator/generate', {

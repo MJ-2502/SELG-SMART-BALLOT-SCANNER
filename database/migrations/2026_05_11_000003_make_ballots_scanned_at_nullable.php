@@ -12,27 +12,36 @@ return new class extends Migration
         $driver = DB::getDriverName();
 
         if ($driver === 'sqlite') {
-            Schema::rename('ballots', 'ballots_old');
+            // Drop indexes to avoid name collisions while rebuilding the table.
+            DB::statement('DROP INDEX IF EXISTS ballots_election_id_ballot_number_unique');
+            DB::statement('DROP INDEX IF EXISTS ballots_uuid_unique');
+            DB::statement('DROP INDEX IF EXISTS ballots_image_hash_unique');
 
-            Schema::create('ballots', function (Blueprint $table) {
+            Schema::disableForeignKeyConstraints();
+
+            Schema::create('ballots_new', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('election_id')->nullable()->constrained('elections')->nullOnDelete();
                 $table->unsignedInteger('ballot_number')->nullable();
-                $table->uuid('uuid')->unique();
-                $table->string('image_hash')->nullable()->unique();
+                $table->uuid('uuid');
+                $table->string('image_hash')->nullable();
                 $table->string('image_path')->nullable();
                 $table->timestamp('scanned_at')->nullable();
                 $table->foreignId('scanned_by')->nullable()->constrained('users')->nullOnDelete();
                 $table->string('status')->default('pending');
                 $table->timestamps();
 
+                $table->unique('uuid', 'ballots_uuid_unique');
+                $table->unique('image_hash', 'ballots_image_hash_unique');
                 $table->unique(['election_id', 'ballot_number'], 'ballots_election_id_ballot_number_unique');
             });
 
-            DB::statement('INSERT INTO ballots (id, election_id, ballot_number, uuid, image_hash, image_path, scanned_at, scanned_by, status, created_at, updated_at)
-                SELECT id, election_id, ballot_number, uuid, image_hash, image_path, scanned_at, scanned_by, status, created_at, updated_at FROM ballots_old');
+            DB::statement('INSERT INTO ballots_new (id, election_id, ballot_number, uuid, image_hash, image_path, scanned_at, scanned_by, status, created_at, updated_at)
+                SELECT id, election_id, ballot_number, uuid, image_hash, image_path, scanned_at, scanned_by, status, created_at, updated_at FROM ballots');
 
-            Schema::drop('ballots_old');
+            Schema::drop('ballots');
+            Schema::rename('ballots_new', 'ballots');
+            Schema::enableForeignKeyConstraints();
         } elseif ($driver === 'mysql' || $driver === 'mariadb') {
             DB::statement('ALTER TABLE ballots MODIFY scanned_at TIMESTAMP NULL DEFAULT NULL');
         } elseif ($driver === 'pgsql') {
@@ -59,27 +68,31 @@ return new class extends Migration
         $driver = DB::getDriverName();
 
         if ($driver === 'sqlite') {
-            Schema::rename('ballots', 'ballots_old');
+            Schema::disableForeignKeyConstraints();
 
-            Schema::create('ballots', function (Blueprint $table) {
+            Schema::create('ballots_new', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('election_id')->nullable()->constrained('elections')->nullOnDelete();
                 $table->unsignedInteger('ballot_number')->nullable();
-                $table->uuid('uuid')->unique();
-                $table->string('image_hash')->nullable()->unique();
+                $table->uuid('uuid');
+                $table->string('image_hash')->nullable();
                 $table->string('image_path')->nullable();
                 $table->timestamp('scanned_at')->useCurrent();
                 $table->foreignId('scanned_by')->nullable()->constrained('users')->nullOnDelete();
                 $table->string('status')->default('pending');
                 $table->timestamps();
 
+                $table->unique('uuid', 'ballots_uuid_unique');
+                $table->unique('image_hash', 'ballots_image_hash_unique');
                 $table->unique(['election_id', 'ballot_number'], 'ballots_election_id_ballot_number_unique');
             });
 
-            DB::statement('INSERT INTO ballots (id, election_id, ballot_number, uuid, image_hash, image_path, scanned_at, scanned_by, status, created_at, updated_at)
-                SELECT id, election_id, ballot_number, uuid, image_hash, image_path, scanned_at, scanned_by, status, created_at, updated_at FROM ballots_old');
+            DB::statement('INSERT INTO ballots_new (id, election_id, ballot_number, uuid, image_hash, image_path, scanned_at, scanned_by, status, created_at, updated_at)
+                SELECT id, election_id, ballot_number, uuid, image_hash, image_path, scanned_at, scanned_by, status, created_at, updated_at FROM ballots');
 
-            Schema::drop('ballots_old');
+            Schema::drop('ballots');
+            Schema::rename('ballots_new', 'ballots');
+            Schema::enableForeignKeyConstraints();
         } elseif ($driver === 'mysql' || $driver === 'mariadb') {
             DB::statement('ALTER TABLE ballots MODIFY scanned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
         } elseif ($driver === 'pgsql') {

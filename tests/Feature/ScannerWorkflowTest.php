@@ -89,6 +89,13 @@ class ScannerWorkflowTest extends TestCase
             'is_active' => true,
         ]);
 
+        $ballot = Ballot::query()->create([
+            'election_id' => $election->id,
+            'ballot_number' => 101,
+            'uuid' => (string) Str::uuid(),
+            'status' => 'pending',
+        ]);
+
         $imageHash = str_repeat('a', 64);
 
         $response = $this->actingAs($user)->postJson(route('scanner.submit'), [
@@ -112,6 +119,7 @@ class ScannerWorkflowTest extends TestCase
         ]);
 
         $this->assertDatabaseHas('ballots', [
+            'id' => $ballot->id,
             'image_hash' => $imageHash,
             'election_id' => $election->id,
             'ballot_number' => 101,
@@ -216,7 +224,7 @@ class ScannerWorkflowTest extends TestCase
         $response->assertStatus(409);
         $response->assertJson([
             'success' => false,
-            'message' => 'Duplicate ballot detected. This scan was already submitted.',
+            'message' => 'This ballot has already been submitted. Please scan the next ballot.',
         ]);
     }
 

@@ -78,13 +78,6 @@ class BallotManagementController extends Controller
                 ->with('error', 'Ballot is not linked to an election and cannot be deleted from this page.');
         }
 
-        $isFinishedElection = $election->status === 'completed' || $election->election_date?->isPast();
-        if (! $isFinishedElection) {
-            return redirect()
-                ->route('admin.ballot-management.index', ['election' => $election->id])
-                ->with('error', 'You can only delete generated ballots from past or finished elections.');
-        }
-
         if ($ballot->status !== 'pending') {
             return redirect()
                 ->route('admin.ballot-management.index', ['election' => $ballot->election_id])
