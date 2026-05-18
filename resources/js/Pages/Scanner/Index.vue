@@ -135,19 +135,202 @@ const ballotNumberOutOfRange = computed(() => {
     return n < 1 || n > exp;
 });
 
-// Positions that have no detected vote (used to block submit)
-const undervotedPositions = computed(() => {
+const votesAllowedByPosition = computed(() => {
+    const map = new Map();
+    props.positions.forEach((position) => {
+        const limit = Math.max(1, Number(position.votes_allowed ?? 1));
+        map.set(position.id, limit);
+    });
+    return map;
+});
+
+const manualSelections = ref({});
+const manualDraftSelections = ref({});
+
+const getDetectedVotesForPosition = (positionId) => {
+    const votes = pendingSubmission.value?.detected_votes;
+    if (!Array.isArray(votes)) return [];
+    return votes.filter((vote) => Number(vote.position_id) === Number(positionId));
+};
+
+const getManualSelectionsForPosition = (positionId) => {
+    const current = manualSelections.value?.[positionId];
+    if (!Array.isArray(current)) return [];
+    return current.filter((id) => Number.isFinite(Number(id)));
+};
+
+const getManualDraftSelectionsForPosition = (positionId) => {
+    const current = manualDraftSelections.value?.[positionId];
+    if (Array.isArray(current)) return current.filter((id) => Number.isFinite(Number(id)));
+    return getManualSelectionsForPosition(positionId);
+};
+
+const getManualLimitForPosition = (positionId) => {
+    const limit = votesAllowedByPosition.value.get(positionId) ?? 1;
+    const detectedCount = getDetectedVotesForPosition(positionId).length;
+    return Math.max(0, limit - detectedCount);
+};
+
+const manualRemainingForPosition = (positionId) => {
+    const limit = getManualLimitForPosition(positionId);
+    const manualCount = getManualSelectionsForPosition(positionId).length;
+    return Math.max(0, limit - manualCount);
+};
+
+const isMultiSeatPosition = (positionId) => {
+    const limit = votesAllowedByPosition.value.get(positionId) ?? 1;
+    return limit > 1;
+};
+
+const positionNeedsManualVote = (position) => {
+    const limit = votesAllowedByPosition.value.get(position.id) ?? 1;
+    const detectedCount = getDetectedVotesForPosition(position.id).length;
+    const manualCount = getManualSelectionsForPosition(position.id).length;
+    return detectedCount + manualCount < limit;
+};
+
+const positionsNeedingManualVotes = computed(() => {
     if (!pendingSubmission.value) return [];
-    const votedPositionIds = new Set(
-        (pendingSubmission.value.detected_votes || []).map(v => v.position_id)
-    );
-    return props.positions.filter(p => !votedPositionIds.has(p.id));
+    return props.positions.filter((position) => positionNeedsManualVote(position));
+});
+
+const remainingMissingVotes = computed(() => {
+    return positionsNeedingManualVotes.value.reduce((sum, position) => {
+        const limit = votesAllowedByPosition.value.get(position.id) ?? 1;
+        const detectedCount = getDetectedVotesForPosition(position.id).length;
+        const manualCount = getManualSelectionsForPosition(position.id).length;
+        return sum + Math.max(0, limit - detectedCount - manualCount);
+    }, 0);
+});
+
+const manualOptionsForPosition = (position) => {
+    const detectedIds = new Set(getDetectedVotesForPosition(position.id)
+        .map((vote) => Number(vote.candidate_id))
+        .filter((id) => Number.isFinite(id)));
+    const candidates = Array.isArray(position.candidates) ? position.candidates : [];
+    return candidates.filter((candidate) => !detectedIds.has(Number(candidate.id)));
+};
+
+const setManualSelection = (positionId, candidateId) => {
+    const limit = getManualLimitForPosition(positionId);
+    if (limit <= 0) return;
+    manualSelections.value = {
+        ...manualSelections.value,
+        [positionId]: [Number(candidateId)],
+    };
+};
+
+const toggleManualSelection = (positionId, candidateId) => {
+    const limit = getManualLimitForPosition(positionId);
+    const current = getManualSelectionsForPosition(positionId);
+    const normalizedId = Number(candidateId);
+    const exists = current.includes(normalizedId);
+    const next = exists
+        ? current.filter((id) => id !== normalizedId)
+        : [...current, normalizedId];
+
+    if (!exists && next.length > limit) return;
+
+    manualSelections.value = {
+        ...manualSelections.value,
+        [positionId]: next,
+    };
+};
+
+const setManualDraftSelections = (positionId, selections) => {
+    manualDraftSelections.value = {
+        ...manualDraftSelections.value,
+        [positionId]: selections,
+    };
+};
+
+const normalizeIdArray = (arr) => arr
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id))
+    .sort((a, b) => a - b);
+
+const hasManualDraftChanges = (positionId) => {
+    const draft = normalizeIdArray(getManualDraftSelectionsForPosition(positionId));
+    const saved = normalizeIdArray(getManualSelectionsForPosition(positionId));
+    if (draft.length !== saved.length) return true;
+    return draft.some((id, idx) => id !== saved[idx]);
+};
+
+const saveManualSelection = (positionId) => {
+    const draft = normalizeIdArray(getManualDraftSelectionsForPosition(positionId));
+    manualSelections.value = {
+        ...manualSelections.value,
+        [positionId]: draft,
+    };
+    const nextDraft = { ...manualDraftSelections.value };
+    delete nextDraft[positionId];
+    manualDraftSelections.value = nextDraft;
+};
+
+const handleManualSelectChange = (positionId, event) => {
+    const selected = event?.target?.value ?? '';
+    if (!selected) {
+        setManualDraftSelections(positionId, []);
+        return;
+    }
+    setManualDraftSelections(positionId, [Number(selected)]);
+};
+
+const handleManualMultiSelectChange = (positionId, event) => {
+    const limit = getManualLimitForPosition(positionId);
+    const options = Array.from(event?.target?.selectedOptions ?? []);
+    const selected = options
+        .map((opt) => Number(opt.value))
+        .filter((id) => Number.isFinite(id));
+    const trimmed = limit > 0 ? selected.slice(0, limit) : [];
+    setManualDraftSelections(positionId, trimmed);
+};
+
+const candidateById = computed(() => {
+    const map = new Map();
+    props.positions.forEach((position) => {
+        const candidates = Array.isArray(position.candidates) ? position.candidates : [];
+        candidates.forEach((candidate) => {
+            map.set(candidate.id, {
+                ...candidate,
+                position_id: position.id,
+            });
+        });
+    });
+    return map;
+});
+
+const manualVotes = computed(() => {
+    const votes = [];
+    Object.entries(manualSelections.value || {}).forEach(([positionId, candidateIds]) => {
+        if (!Array.isArray(candidateIds)) return;
+        candidateIds.forEach((candidateId) => {
+            const candidate = candidateById.value.get(Number(candidateId));
+            votes.push({
+                position_id: Number(positionId),
+                candidate_id: Number(candidateId),
+                candidate_name: candidate?.name ?? `Candidate ${candidateId}`,
+                candidate_party: candidate?.party ?? null,
+                confidence: null,
+                source: 'manual',
+            });
+        });
+    });
+    return votes;
+});
+
+const mergedVotesForDisplay = computed(() => {
+    const detected = Array.isArray(pendingSubmission.value?.detected_votes)
+        ? pendingSubmission.value.detected_votes
+        : [];
+    if (!manualVotes.value.length) return detected;
+    return [...detected, ...manualVotes.value];
 });
 
 const canSubmitBallot = computed(() =>
     scanPhase.value === 'validating' &&
     pendingSubmission.value !== null &&
-    undervotedPositions.value.length === 0 &&
+    remainingMissingVotes.value === 0 &&
     !ballotNumberOutOfRange.value
 );
 
@@ -877,6 +1060,8 @@ const runScan = async () => {
     scanPhase.value = 'scanning';
     pendingSubmission.value = null;
     validationError.value = '';
+    manualSelections.value = {};
+    manualDraftSelections.value = {};
     submitState.value = 'Waiting for a successful scan.';
 
     const formData = new FormData();
@@ -964,6 +1149,30 @@ const submitDetectedVotes = async () => {
     scanPhase.value = 'submitting';
     validationError.value = '';
 
+    const detected = Array.isArray(pendingSubmission.value.detected_votes)
+        ? pendingSubmission.value.detected_votes
+        : [];
+    const submissionVotes = [];
+    const seen = new Set();
+    const pushVote = (vote) => {
+        const key = `${vote.position_id}:${vote.candidate_id}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        submissionVotes.push({
+            position_id: vote.position_id,
+            candidate_id: vote.candidate_id,
+            confidence: vote.confidence ?? null,
+        });
+    };
+
+    detected.forEach((vote) => pushVote(vote));
+    manualVotes.value.forEach((vote) => pushVote(vote));
+
+    const submissionPayload = {
+        ...pendingSubmission.value,
+        detected_votes: submissionVotes,
+    };
+
     try {
         const response = await fetch(props.submitUrl, {
             method: 'POST',
@@ -972,7 +1181,7 @@ const submitDetectedVotes = async () => {
                 Accept: 'application/json',
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(pendingSubmission.value),
+            body: JSON.stringify(submissionPayload),
         });
 
         const payload = await parseJsonSafely(response);
@@ -1102,6 +1311,8 @@ const scanNextBallot = () => {
     capturePreviewOpen.value = false;
     flagModalOpen.value = false;
     flagError.value = '';
+    manualSelections.value = {};
+    manualDraftSelections.value = {};
     ballotNumber.value = next;
     capturedBlob = null;
     detectedVotes.value = [];
@@ -1125,6 +1336,8 @@ const rescanBallot = () => {
     validationError.value = '';
     flagModalOpen.value = false;
     flagError.value = '';
+    manualSelections.value = {};
+    manualDraftSelections.value = {};
     capturedBlob = null;
     capturePreviewOpen.value = false;
     detectedVotes.value = [];
@@ -1615,27 +1828,24 @@ onBeforeUnmount(() => {
                             {{ validationError }}
                         </div>
 
-                        <!-- Undervote warning -->
-                        <div v-if="undervotedPositions.length" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
-                            <p class="font-semibold mb-1">⚠ No vote detected for:</p>
-                            <ul class="list-disc list-inside space-y-0.5">
-                                <li v-for="pos in undervotedPositions" :key="pos.id">{{ pos.name }}</li>
-                            </ul>
-                            <p class="mt-1.5 text-xs">Submission is blocked until all positions have a detected vote. Rescan to retry.</p>
+                        <div v-if="remainingMissingVotes > 0" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+                            Missing votes detected. Select the correct candidate(s) below or rescan the ballot.
                         </div>
 
                         <!-- Votes grouped by position -->
-                        <template v-if="pendingSubmission?.detected_votes?.length">
+                        <template v-if="mergedVotesForDisplay.length">
                             <div v-for="position in positions" :key="position.id">
                                 <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">{{ position.name }}</p>
-                                <template v-if="pendingSubmission.detected_votes.filter(v => v.position_id === position.id).length">
-                                    <div v-for="vote in pendingSubmission.detected_votes.filter(v => v.position_id === position.id)"
+                                <template v-if="mergedVotesForDisplay.filter(v => v.position_id === position.id).length">
+                                    <div v-for="vote in mergedVotesForDisplay.filter(v => v.position_id === position.id)"
                                         :key="vote.candidate_id"
                                         class="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
                                         <div class="flex items-center gap-2">
                                             <i class="bi bi-check-circle-fill text-emerald-600 text-base flex-shrink-0 leading-none" aria-hidden="true"></i>
                                             <span class="font-medium text-slate-800">{{ vote.candidate_name }}</span>
                                             <span v-if="vote.candidate_party" class="text-xs text-slate-500">· {{ vote.candidate_party }}</span>
+                                            <span v-if="vote.source === 'manual'"
+                                                class="text-[0.65rem] font-semibold uppercase tracking-wide text-amber-700">Manual</span>
                                         </div>
                                         <span v-if="Number.isFinite(Number(vote.confidence))"
                                             class="text-xs font-medium px-1.5 py-0.5 rounded-full"
@@ -1647,6 +1857,49 @@ onBeforeUnmount(() => {
                                 <div v-else class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 flex items-center gap-2">
                                     <i class="bi bi-x-circle text-base flex-shrink-0 leading-none" aria-hidden="true"></i>
                                     No vote detected
+                                </div>
+
+                                <div v-if="positionNeedsManualVote(position)" class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <p class="text-xs font-semibold text-amber-900">Manual selection</p>
+                                        <span class="text-[0.7rem] text-amber-700">Needs {{ manualRemainingForPosition(position.id) }} more</span>
+                                    </div>
+
+                                    <div v-if="manualOptionsForPosition(position).length" class="mt-2 grid gap-2">
+                                        <select
+                                            v-if="!isMultiSeatPosition(position.id)"
+                                            class="w-full rounded-lg border-slate-300 text-sm focus:border-amber-500 focus:ring-amber-500"
+                                            :value="getManualDraftSelectionsForPosition(position.id)[0] || ''"
+                                            @change="handleManualSelectChange(position.id, $event)">
+                                            <option value="" disabled>Select candidate</option>
+                                            <option v-for="candidate in manualOptionsForPosition(position)" :key="`manual-${position.id}-${candidate.id}`" :value="candidate.id">
+                                                {{ candidate.name }}
+                                            </option>
+                                        </select>
+                                        <select
+                                            v-else
+                                            multiple
+                                            class="w-full rounded-lg border-slate-300 text-sm focus:border-amber-500 focus:ring-amber-500"
+                                            :value="getManualDraftSelectionsForPosition(position.id)"
+                                            @change="handleManualMultiSelectChange(position.id, $event)">
+                                            <option v-for="candidate in manualOptionsForPosition(position)" :key="`manual-${position.id}-${candidate.id}`" :value="candidate.id">
+                                                {{ candidate.name }}
+                                            </option>
+                                        </select>
+                                        <p v-if="isMultiSeatPosition(position.id)" class="text-[0.7rem] text-slate-500">
+                                            Hold Ctrl (Windows) or Command (Mac) to select multiple.
+                                        </p>
+                                        <div class="flex items-center justify-end gap-2">
+                                            <button type="button"
+                                                class="rounded-lg border border-amber-300 bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-50"
+                                                :disabled="!hasManualDraftChanges(position.id)"
+                                                @click="saveManualSelection(position.id)">
+                                                Save selection
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <p v-else class="mt-2 text-xs text-slate-500">No candidates available for manual selection.</p>
                                 </div>
                             </div>
                         </template>
@@ -1680,17 +1933,17 @@ onBeforeUnmount(() => {
                 </div>
 
                 <!-- Footer actions -->
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-5 py-4 border-t border-slate-200 bg-slate-50 flex-shrink-0">
-                    <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                <div class="flex flex-row flex-wrap items-center gap-2 px-5 py-4 border-t border-slate-200 bg-slate-50 flex-shrink-0">
+                    <div class="flex flex-row flex-wrap gap-2 flex-1 min-w-[220px]">
                         <button type="button"
-                            class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            class="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                             :disabled="scanPhase === 'submitting'"
                             @click="rescanBallot">
                             <i class="bi bi-arrow-counterclockwise text-base leading-none" aria-hidden="true"></i>
                             Rescan
                         </button>
                         <button type="button"
-                            class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+                            class="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
                             :disabled="scanPhase === 'submitting' || flagInProgress"
                             @click="openFlagModal">
                             <i class="bi bi-flag-fill text-base leading-none" aria-hidden="true"></i>
@@ -1698,7 +1951,7 @@ onBeforeUnmount(() => {
                         </button>
                     </div>
                     <button type="button"
-                        class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-60"
+                        class="inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-60 min-w-[220px]"
                         :class="scanPhase === 'submitting' ? 'bg-indigo-700 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'"
                         :disabled="!canSubmitBallot || scanPhase === 'submitting'"
                         @click="submitDetectedVotes">
