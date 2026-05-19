@@ -571,9 +571,14 @@ const stopEchoListener = () => {
                 <div v-for="position in positionTallies" :key="position.position_id" class="rounded-xl border border-slate-200 p-4">
                     <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                         <h3 class="font-semibold text-slate-900">{{ position.position_name }}</h3>
-                        <span class="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
-                            {{ (position.total_votes ?? 0).toLocaleString() }} votes
-                        </span>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
+                                {{ (position.total_votes ?? 0).toLocaleString() }} votes
+                            </span>
+                            <span v-if="(position.no_vote_count ?? 0) > 0" class="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+                                {{ position.no_vote_count.toLocaleString() }} no-vote
+                            </span>
+                        </div>
                     </div>
 
                     <div class="h-60">

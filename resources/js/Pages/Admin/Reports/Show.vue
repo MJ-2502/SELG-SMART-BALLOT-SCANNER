@@ -282,8 +282,13 @@ const getPercent = (votes, total) => {
                             <template v-for="position in reportData.position_tallies ?? []" :key="position.position_id">
                                 <tr class="bg-slate-100/80">
                                     <td colspan="5" class="px-6 py-2 text-sm">
-                                        <span class="font-bold text-slate-800">{{ position.position_name }}</span> 
-                                        <span class="ml-2 text-xs font-medium text-slate-500 border border-slate-200 bg-white rounded px-2 py-0.5">Total Votes: {{ position.total_votes }}</span>
+                                        <div class="flex flex-wrap items-center justify-between gap-2">
+                                            <span class="font-bold text-slate-800">{{ position.position_name }}</span>
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-xs font-medium text-slate-500 border border-slate-200 bg-white rounded px-2 py-0.5">Total Votes: {{ position.total_votes }}</span>
+                                                <span v-if="(position.no_vote_count ?? 0) > 0" class="text-xs font-semibold text-amber-700 border border-amber-200 bg-amber-50 rounded px-2 py-0.5">No-vote: {{ position.no_vote_count }}</span>
+                                            </div>
+                                        </div>
                                     </td>
                                 </tr>
                                 <tr v-for="candidate in position.candidates" :key="candidate.id" class="hover:bg-slate-50 transition-colors">

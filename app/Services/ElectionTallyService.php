@@ -38,11 +38,21 @@ class ElectionTallyService
             ->selectRaw('votes.candidate_id, COUNT(*) as total_votes')
             ->join('ballots', 'ballots.id', '=', 'votes.ballot_id')
             ->where('ballots.election_id', $election->id)
-            ->where('ballots.status', 'scanned')
+            ->whereIn('ballots.status', ['scanned', 'flagged'])
             ->where('votes.is_valid', true)
             ->whereNotNull('votes.candidate_id')
             ->groupBy('votes.candidate_id')
             ->pluck('total_votes', 'votes.candidate_id');
+
+        $ballotsWithVotesByPosition = Vote::query()
+            ->selectRaw('votes.position_id, COUNT(DISTINCT votes.ballot_id) as ballots_with_votes')
+            ->join('ballots', 'ballots.id', '=', 'votes.ballot_id')
+            ->where('ballots.election_id', $election->id)
+            ->whereIn('ballots.status', ['scanned', 'flagged'])
+            ->where('votes.is_valid', true)
+            ->whereNotNull('votes.candidate_id')
+            ->groupBy('votes.position_id')
+            ->pluck('ballots_with_votes', 'votes.position_id');
 
         $positions = Position::query()
             ->with([
@@ -75,12 +85,16 @@ class ElectionTallyService
                 ->values();
 
             $totalPositionVotes = (int) $candidateRows->sum('votes');
+            $votesAllowed = max(1, (int) ($position->votes_allowed ?? 1));
+            $ballotsWithVotes = (int) ($ballotsWithVotesByPosition[$position->id] ?? 0);
+            $noVoteCount = max(0, $totalScanned - $ballotsWithVotes);
 
             $positionTallies[] = [
                 'position_id' => $position->id,
                 'position_name' => $position->name,
-                'votes_allowed' => (int) ($position->votes_allowed ?? 1),
+                'votes_allowed' => $votesAllowed,
                 'total_votes' => $totalPositionVotes,
+                'no_vote_count' => $noVoteCount,
                 'candidates' => $candidateRows->all(),
             ];
 

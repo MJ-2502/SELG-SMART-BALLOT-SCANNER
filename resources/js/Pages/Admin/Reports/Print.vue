@@ -113,9 +113,16 @@ const getPercent = (votes, total) => {
                     </thead>
                     <tbody v-for="position in reportData.position_tallies ?? []" :key="position.position_id" class="tally-group">
                         <tr class="group-header-row">
-                            <td colspan="4">
-                                <strong>{{ position.position_name }}</strong> 
-                                <span class="muted-text">(Total Votes: {{ position.total_votes }})</span>
+                            <td>
+                                <strong>{{ position.position_name }}</strong>
+                            </td>
+                            <td></td>
+                            <td></td>
+                            <td class="group-header-counters-cell">
+                                <div class="group-header-counters">
+                                    <span class="muted-text">(Total Votes: {{ position.total_votes }})</span>
+                                    <span v-if="(position.no_vote_count ?? 0) > 0" class="muted-text">(No-vote: {{ position.no_vote_count }})</span>
+                                </div>
                             </td>
                         </tr>
                         <tr v-for="candidate in position.candidates" :key="candidate.id">
@@ -269,6 +276,19 @@ const getPercent = (votes, total) => {
     color: #374151;
     font-size: 0.85rem;
     text-transform: uppercase;
+}
+
+.group-header-counters {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    width: 100%;
+}
+
+.group-header-counters-cell {
+    text-align: right;
+    white-space: nowrap;
 }
 
 .winner-table th {
