@@ -146,6 +146,20 @@ const votesAllowedByPosition = computed(() => {
 
 const manualSelections = ref({});
 const manualDraftSelections = ref({});
+const manualReasonByPosition = ref({});
+const manualReasonDraftByPosition = ref({});
+const manualSaveNoticeByPosition = ref({});
+const manualSaveTimers = new Map();
+const manualReasonOptions = [
+    { value: 'no_vote', label: 'No vote marked' },
+    { value: 'overvote', label: 'Overvote (too many marks)' },
+];
+const manualReasonTokenPrefix = 'reason:';
+
+const manualReasonLabel = (reason) => {
+    const match = manualReasonOptions.find((option) => option.value === reason);
+    return match ? match.label : 'Reason selected';
+};
 
 const getDetectedVotesForPosition = (positionId) => {
     const votes = pendingSubmission.value?.detected_votes;
@@ -163,6 +177,75 @@ const getManualDraftSelectionsForPosition = (positionId) => {
     const current = manualDraftSelections.value?.[positionId];
     if (Array.isArray(current)) return current.filter((id) => Number.isFinite(Number(id)));
     return getManualSelectionsForPosition(positionId);
+};
+
+const hasManualDraftSelectionsForPosition = (positionId) => (
+    Object.prototype.hasOwnProperty.call(manualDraftSelections.value, positionId)
+);
+
+const getManualReasonForPosition = (positionId) => (
+    manualReasonByPosition.value?.[positionId] ?? ''
+);
+
+const getManualSaveNoticeForPosition = (positionId) => (
+    manualSaveNoticeByPosition.value?.[positionId] ?? ''
+);
+
+const hasManualReasonDraftForPosition = (positionId) => (
+    Object.prototype.hasOwnProperty.call(manualReasonDraftByPosition.value, positionId)
+);
+
+const getManualReasonDraftForPosition = (positionId) => (
+    hasManualReasonDraftForPosition(positionId)
+        ? (manualReasonDraftByPosition.value?.[positionId] ?? '')
+        : getManualReasonForPosition(positionId)
+);
+
+const setManualReasonForPosition = (positionId, reason) => {
+    manualReasonByPosition.value = {
+        ...manualReasonByPosition.value,
+        [positionId]: reason,
+    };
+};
+
+const setManualReasonDraftForPosition = (positionId, reason) => {
+    manualReasonDraftByPosition.value = {
+        ...manualReasonDraftByPosition.value,
+        [positionId]: reason,
+    };
+};
+
+const clearManualReasonDraftForPosition = (positionId) => {
+    const next = { ...manualReasonDraftByPosition.value };
+    delete next[positionId];
+    manualReasonDraftByPosition.value = next;
+};
+
+const clearManualReasonForPosition = (positionId) => {
+    const next = { ...manualReasonByPosition.value };
+    delete next[positionId];
+    manualReasonByPosition.value = next;
+};
+
+const showManualSaveNotice = (positionId, message = 'Saved') => {
+    manualSaveNoticeByPosition.value = {
+        ...manualSaveNoticeByPosition.value,
+        [positionId]: message,
+    };
+
+    const existing = manualSaveTimers.get(positionId);
+    if (existing) {
+        clearTimeout(existing);
+    }
+
+    const timer = setTimeout(() => {
+        const next = { ...manualSaveNoticeByPosition.value };
+        delete next[positionId];
+        manualSaveNoticeByPosition.value = next;
+        manualSaveTimers.delete(positionId);
+    }, 1800);
+
+    manualSaveTimers.set(positionId, timer);
 };
 
 const getManualLimitForPosition = (positionId) => {
@@ -189,6 +272,11 @@ const positionNeedsManualVote = (position) => {
     return detectedCount + manualCount < limit;
 };
 
+const hasSavedManualDecision = (positionId) => (
+    getManualSelectionsForPosition(positionId).length > 0
+    || Boolean(getManualReasonForPosition(positionId))
+);
+
 const positionsNeedingManualVotes = computed(() => {
     if (!pendingSubmission.value) return [];
     return props.positions.filter((position) => positionNeedsManualVote(position));
@@ -203,38 +291,18 @@ const remainingMissingVotes = computed(() => {
     }, 0);
 });
 
+const allMissingPositionsConfirmed = computed(() => (
+    positionsNeedingManualVotes.value.length === 0
+        ? false
+        : positionsNeedingManualVotes.value.every((position) => Boolean(getManualReasonForPosition(position.id)))
+));
+
 const manualOptionsForPosition = (position) => {
     const detectedIds = new Set(getDetectedVotesForPosition(position.id)
         .map((vote) => Number(vote.candidate_id))
         .filter((id) => Number.isFinite(id)));
     const candidates = Array.isArray(position.candidates) ? position.candidates : [];
     return candidates.filter((candidate) => !detectedIds.has(Number(candidate.id)));
-};
-
-const setManualSelection = (positionId, candidateId) => {
-    const limit = getManualLimitForPosition(positionId);
-    if (limit <= 0) return;
-    manualSelections.value = {
-        ...manualSelections.value,
-        [positionId]: [Number(candidateId)],
-    };
-};
-
-const toggleManualSelection = (positionId, candidateId) => {
-    const limit = getManualLimitForPosition(positionId);
-    const current = getManualSelectionsForPosition(positionId);
-    const normalizedId = Number(candidateId);
-    const exists = current.includes(normalizedId);
-    const next = exists
-        ? current.filter((id) => id !== normalizedId)
-        : [...current, normalizedId];
-
-    if (!exists && next.length > limit) return;
-
-    manualSelections.value = {
-        ...manualSelections.value,
-        [positionId]: next,
-    };
 };
 
 const setManualDraftSelections = (positionId, selections) => {
@@ -253,34 +321,112 @@ const hasManualDraftChanges = (positionId) => {
     const draft = normalizeIdArray(getManualDraftSelectionsForPosition(positionId));
     const saved = normalizeIdArray(getManualSelectionsForPosition(positionId));
     if (draft.length !== saved.length) return true;
-    return draft.some((id, idx) => id !== saved[idx]);
+    if (draft.some((id, idx) => id !== saved[idx])) return true;
+
+    if (hasManualReasonDraftForPosition(positionId)) {
+        return getManualReasonDraftForPosition(positionId) !== getManualReasonForPosition(positionId);
+    }
+
+    return false;
 };
 
 const saveManualSelection = (positionId) => {
-    const draft = normalizeIdArray(getManualDraftSelectionsForPosition(positionId));
-    manualSelections.value = {
-        ...manualSelections.value,
-        [positionId]: draft,
-    };
+    const draftReason = hasManualReasonDraftForPosition(positionId)
+        ? getManualReasonDraftForPosition(positionId)
+        : '';
+    if (draftReason) {
+        setManualReasonForPosition(positionId, draftReason);
+        manualSelections.value = {
+            ...manualSelections.value,
+            [positionId]: [],
+        };
+    } else {
+        const draft = normalizeIdArray(getManualDraftSelectionsForPosition(positionId));
+        manualSelections.value = {
+            ...manualSelections.value,
+            [positionId]: draft,
+        };
+        clearManualReasonForPosition(positionId);
+    }
+
+    clearManualReasonDraftForPosition(positionId);
     const nextDraft = { ...manualDraftSelections.value };
     delete nextDraft[positionId];
     manualDraftSelections.value = nextDraft;
+    showManualSaveNotice(positionId);
 };
 
-const handleManualSelectChange = (positionId, event) => {
-    const selected = event?.target?.value ?? '';
+const manualDecisionValueForPosition = (positionId) => {
+    if (hasManualReasonDraftForPosition(positionId)) {
+        const reasonDraft = getManualReasonDraftForPosition(positionId);
+        return reasonDraft ? `${manualReasonTokenPrefix}${reasonDraft}` : '';
+    }
+
+    if (hasManualDraftSelectionsForPosition(positionId)) {
+        return getManualDraftSelectionsForPosition(positionId)[0] ?? '';
+    }
+
+    const savedReason = getManualReasonForPosition(positionId);
+    if (savedReason) return `${manualReasonTokenPrefix}${savedReason}`;
+    return getManualSelectionsForPosition(positionId)[0] ?? '';
+};
+
+const manualDecisionValuesForPosition = (positionId) => {
+    if (hasManualReasonDraftForPosition(positionId)) {
+        const reasonDraft = getManualReasonDraftForPosition(positionId);
+        return reasonDraft ? [`${manualReasonTokenPrefix}${reasonDraft}`] : [];
+    }
+
+    if (hasManualDraftSelectionsForPosition(positionId)) {
+        return getManualDraftSelectionsForPosition(positionId).map((id) => String(id));
+    }
+
+    const savedReason = getManualReasonForPosition(positionId);
+    if (savedReason) return [`${manualReasonTokenPrefix}${savedReason}`];
+    return getManualSelectionsForPosition(positionId).map((id) => String(id));
+};
+
+const clearManualDraftSelectionsForPosition = (positionId) => {
+    const next = { ...manualDraftSelections.value };
+    delete next[positionId];
+    manualDraftSelections.value = next;
+};
+
+const handleManualDecisionChange = (positionId, event) => {
+    const selected = String(event?.target?.value ?? '');
     if (!selected) {
-        setManualDraftSelections(positionId, []);
+        clearManualDraftSelectionsForPosition(positionId);
+        clearManualReasonDraftForPosition(positionId);
         return;
     }
+
+    if (selected.startsWith(manualReasonTokenPrefix)) {
+        const reason = selected.slice(manualReasonTokenPrefix.length);
+        setManualReasonDraftForPosition(positionId, reason);
+        clearManualDraftSelectionsForPosition(positionId);
+        return;
+    }
+
+    clearManualReasonDraftForPosition(positionId);
     setManualDraftSelections(positionId, [Number(selected)]);
 };
 
-const handleManualMultiSelectChange = (positionId, event) => {
+const handleManualDecisionMultiChange = (positionId, event) => {
     const limit = getManualLimitForPosition(positionId);
     const options = Array.from(event?.target?.selectedOptions ?? []);
-    const selected = options
-        .map((opt) => Number(opt.value))
+    const selectedValues = options.map((opt) => String(opt.value));
+    const reasonValue = selectedValues.find((value) => value.startsWith(manualReasonTokenPrefix));
+
+    if (reasonValue) {
+        const reason = reasonValue.slice(manualReasonTokenPrefix.length);
+        setManualReasonDraftForPosition(positionId, reason);
+        clearManualDraftSelectionsForPosition(positionId);
+        return;
+    }
+
+    clearManualReasonDraftForPosition(positionId);
+    const selected = selectedValues
+        .map((value) => Number(value))
         .filter((id) => Number.isFinite(id));
     const trimmed = limit > 0 ? selected.slice(0, limit) : [];
     setManualDraftSelections(positionId, trimmed);
@@ -330,7 +476,7 @@ const mergedVotesForDisplay = computed(() => {
 const canSubmitBallot = computed(() =>
     scanPhase.value === 'validating' &&
     pendingSubmission.value !== null &&
-    remainingMissingVotes.value === 0 &&
+    (remainingMissingVotes.value === 0 || allMissingPositionsConfirmed.value) &&
     !ballotNumberOutOfRange.value
 );
 
@@ -1062,6 +1208,9 @@ const runScan = async () => {
     validationError.value = '';
     manualSelections.value = {};
     manualDraftSelections.value = {};
+    manualReasonByPosition.value = {};
+    manualReasonDraftByPosition.value = {};
+    manualSaveNoticeByPosition.value = {};
     submitState.value = 'Waiting for a successful scan.';
 
     const formData = new FormData();
@@ -1171,6 +1320,7 @@ const submitDetectedVotes = async () => {
     const submissionPayload = {
         ...pendingSubmission.value,
         detected_votes: submissionVotes,
+        manual_reasons: manualReasonByPosition.value,
     };
 
     try {
@@ -1313,6 +1463,9 @@ const scanNextBallot = () => {
     flagError.value = '';
     manualSelections.value = {};
     manualDraftSelections.value = {};
+    manualReasonByPosition.value = {};
+    manualReasonDraftByPosition.value = {};
+    manualSaveNoticeByPosition.value = {};
     ballotNumber.value = next;
     capturedBlob = null;
     detectedVotes.value = [];
@@ -1338,6 +1491,9 @@ const rescanBallot = () => {
     flagError.value = '';
     manualSelections.value = {};
     manualDraftSelections.value = {};
+    manualReasonByPosition.value = {};
+    manualReasonDraftByPosition.value = {};
+    manualSaveNoticeByPosition.value = {};
     capturedBlob = null;
     capturePreviewOpen.value = false;
     detectedVotes.value = [];
@@ -1434,6 +1590,8 @@ onBeforeUnmount(() => {
     clearObjectUrl('debug');
     window.removeEventListener('resize', handleResize);
     document.body.classList.remove('mobile-camera-active');
+    manualSaveTimers.forEach((timerId) => clearTimeout(timerId));
+    manualSaveTimers.clear();
 });
 </script>
 
@@ -1829,7 +1987,7 @@ onBeforeUnmount(() => {
                         </div>
 
                         <div v-if="remainingMissingVotes > 0" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
-                            Missing votes detected. Select the correct candidate(s) below or rescan the ballot.
+                            Missing votes detected. Select the correct candidate(s) below or confirm a reason to submit.
                         </div>
 
                         <!-- Votes grouped by position -->
@@ -1859,37 +2017,63 @@ onBeforeUnmount(() => {
                                     No vote detected
                                 </div>
 
-                                <div v-if="positionNeedsManualVote(position)" class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                                <div v-if="positionNeedsManualVote(position) || hasSavedManualDecision(position.id)"
+                                    class="mt-2 rounded-lg border px-3 py-2"
+                                    :class="hasSavedManualDecision(position.id)
+                                        ? 'border-emerald-200 bg-emerald-50'
+                                        : 'border-amber-200 bg-amber-50'">
                                     <div class="flex items-center justify-between gap-2">
                                         <p class="text-xs font-semibold text-amber-900">Manual selection</p>
-                                        <span class="text-[0.7rem] text-amber-700">Needs {{ manualRemainingForPosition(position.id) }} more</span>
+                                        <div class="flex items-center gap-2 text-[0.7rem]">
+                                            <span class="text-amber-700">
+                                                {{ getManualReasonForPosition(position.id)
+                                                    ? `Reason: ${manualReasonLabel(getManualReasonForPosition(position.id))}`
+                                                    : (getManualSelectionsForPosition(position.id).length > 0
+                                                        ? 'Selection saved'
+                                                        : `Needs ${manualRemainingForPosition(position.id)} more`
+                                                    )
+                                                }}
+                                            </span>
+                                            <span v-if="hasManualDraftChanges(position.id)" class="rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] font-semibold text-amber-700">
+                                                Unsaved change
+                                            </span>
+                                        </div>
                                     </div>
 
-                                    <div v-if="manualOptionsForPosition(position).length" class="mt-2 grid gap-2">
+                                    <div class="mt-2 grid gap-2">
                                         <select
                                             v-if="!isMultiSeatPosition(position.id)"
                                             class="w-full rounded-lg border-slate-300 text-sm focus:border-amber-500 focus:ring-amber-500"
-                                            :value="getManualDraftSelectionsForPosition(position.id)[0] || ''"
-                                            @change="handleManualSelectChange(position.id, $event)">
-                                            <option value="" disabled>Select candidate</option>
+                                            :value="manualDecisionValueForPosition(position.id)"
+                                            @change="handleManualDecisionChange(position.id, $event)">
+                                            <option value="" disabled>Select candidate or reason</option>
                                             <option v-for="candidate in manualOptionsForPosition(position)" :key="`manual-${position.id}-${candidate.id}`" :value="candidate.id">
                                                 {{ candidate.name }}
+                                            </option>
+                                            <option v-for="option in manualReasonOptions" :key="`manual-reason-${position.id}-${option.value}`" :value="`${manualReasonTokenPrefix}${option.value}`">
+                                                {{ option.label }}
                                             </option>
                                         </select>
                                         <select
                                             v-else
                                             multiple
                                             class="w-full rounded-lg border-slate-300 text-sm focus:border-amber-500 focus:ring-amber-500"
-                                            :value="getManualDraftSelectionsForPosition(position.id)"
-                                            @change="handleManualMultiSelectChange(position.id, $event)">
+                                            :value="manualDecisionValuesForPosition(position.id)"
+                                            @change="handleManualDecisionMultiChange(position.id, $event)">
                                             <option v-for="candidate in manualOptionsForPosition(position)" :key="`manual-${position.id}-${candidate.id}`" :value="candidate.id">
                                                 {{ candidate.name }}
+                                            </option>
+                                            <option v-for="option in manualReasonOptions" :key="`manual-reason-${position.id}-${option.value}`" :value="`${manualReasonTokenPrefix}${option.value}`">
+                                                {{ option.label }}
                                             </option>
                                         </select>
                                         <p v-if="isMultiSeatPosition(position.id)" class="text-[0.7rem] text-slate-500">
                                             Hold Ctrl (Windows) or Command (Mac) to select multiple.
                                         </p>
                                         <div class="flex items-center justify-end gap-2">
+                                            <span v-if="getManualSaveNoticeForPosition(position.id)" class="text-xs font-semibold text-emerald-600">
+                                                {{ getManualSaveNoticeForPosition(position.id) }}
+                                            </span>
                                             <button type="button"
                                                 class="rounded-lg border border-amber-300 bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-50"
                                                 :disabled="!hasManualDraftChanges(position.id)"
@@ -1899,7 +2083,7 @@ onBeforeUnmount(() => {
                                         </div>
                                     </div>
 
-                                    <p v-else class="mt-2 text-xs text-slate-500">No candidates available for manual selection.</p>
+                                    <p v-if="!manualOptionsForPosition(position).length" class="text-xs text-slate-500">No candidates available for manual selection.</p>
                                 </div>
                             </div>
                         </template>
