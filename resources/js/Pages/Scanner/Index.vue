@@ -170,13 +170,34 @@ const getDetectedVotesForPosition = (positionId) => {
 const getManualSelectionsForPosition = (positionId) => {
     const current = manualSelections.value?.[positionId];
     if (!Array.isArray(current)) return [];
-    return current.filter((id) => Number.isFinite(Number(id)));
+    return current
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0);
 };
 
 const getManualDraftSelectionsForPosition = (positionId) => {
     const current = manualDraftSelections.value?.[positionId];
-    if (Array.isArray(current)) return current.filter((id) => Number.isFinite(Number(id)));
+    if (Array.isArray(current)) {
+        return current
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id) && id > 0);
+    }
     return getManualSelectionsForPosition(positionId);
+};
+
+const getManualSlotSelectionsForPosition = (positionId) => {
+    const draft = manualDraftSelections.value?.[positionId];
+    if (Array.isArray(draft)) return [...draft];
+    const saved = manualSelections.value?.[positionId];
+    if (Array.isArray(saved)) return [...saved];
+    return [];
+};
+
+const shouldDisableOvervoteForPosition = (positionId) => {
+    if (!isMultiSeatPosition(positionId)) return false;
+    const slots = getManualSlotSelectionsForPosition(positionId);
+    const first = Number(slots?.[0]);
+    return Number.isFinite(first) && first > 0;
 };
 
 const hasManualDraftSelectionsForPosition = (positionId) => (
@@ -184,24 +205,19 @@ const hasManualDraftSelectionsForPosition = (positionId) => (
 );
 
 const getManualReasonForPosition = (positionId) => (
-    manualReasonByPosition.value?.[positionId] ?? ''
+    isMultiSeatPosition(positionId)
+        ? ''
+        : (manualReasonByPosition.value?.[positionId] ?? '')
 );
 
 const getManualSaveNoticeForPosition = (positionId) => (
     manualSaveNoticeByPosition.value?.[positionId] ?? ''
 );
 
-const hasManualReasonDraftForPosition = (positionId) => (
-    Object.prototype.hasOwnProperty.call(manualReasonDraftByPosition.value, positionId)
-);
-
-const getManualReasonDraftForPosition = (positionId) => (
-    hasManualReasonDraftForPosition(positionId)
-        ? (manualReasonDraftByPosition.value?.[positionId] ?? '')
-        : getManualReasonForPosition(positionId)
-);
+// reason draft helpers are defined after slot helpers
 
 const setManualReasonForPosition = (positionId, reason) => {
+    if (isMultiSeatPosition(positionId)) return;
     manualReasonByPosition.value = {
         ...manualReasonByPosition.value,
         [positionId]: reason,
@@ -209,6 +225,7 @@ const setManualReasonForPosition = (positionId, reason) => {
 };
 
 const setManualReasonDraftForPosition = (positionId, reason) => {
+    if (isMultiSeatPosition(positionId)) return;
     manualReasonDraftByPosition.value = {
         ...manualReasonDraftByPosition.value,
         [positionId]: reason,
@@ -249,7 +266,7 @@ const showManualSaveNotice = (positionId, message = 'Saved') => {
 };
 
 const getManualLimitForPosition = (positionId) => {
-    const limit = votesAllowedByPosition.value.get(positionId) ?? 1;
+    const limit = votesAllowedByPosition.value.get(Number(positionId)) ?? 1;
     const detectedCount = getDetectedVotesForPosition(positionId).length;
     return Math.max(0, limit - detectedCount);
 };
@@ -260,10 +277,16 @@ const manualRemainingForPosition = (positionId) => {
     return Math.max(0, limit - manualCount);
 };
 
-const isMultiSeatPosition = (positionId) => {
-    const limit = votesAllowedByPosition.value.get(positionId) ?? 1;
-    return limit > 1;
+const manualRemainingAfterReasons = (positionId) => {
+    const limit = getManualLimitForPosition(positionId);
+    const manualCount = getManualSelectionsForPosition(positionId).length;
+    const reasonCount = getManualReasonCountForPosition(positionId);
+    return Math.max(0, limit - manualCount - reasonCount);
 };
+
+const isMultiSeatPosition = (positionId) => (
+    getManualLimitForPosition(positionId) > 1
+);
 
 const positionNeedsManualVote = (position) => {
     const limit = votesAllowedByPosition.value.get(position.id) ?? 1;
@@ -274,7 +297,9 @@ const positionNeedsManualVote = (position) => {
 
 const hasSavedManualDecision = (positionId) => (
     getManualSelectionsForPosition(positionId).length > 0
-    || Boolean(getManualReasonForPosition(positionId))
+    || (isMultiSeatPosition(positionId)
+        ? getManualReasonCountForPosition(positionId) > 0
+        : Boolean(getManualReasonForPosition(positionId)))
 );
 
 const positionsNeedingManualVotes = computed(() => {
@@ -294,7 +319,15 @@ const remainingMissingVotes = computed(() => {
 const allMissingPositionsConfirmed = computed(() => (
     positionsNeedingManualVotes.value.length === 0
         ? false
-        : positionsNeedingManualVotes.value.every((position) => Boolean(getManualReasonForPosition(position.id)))
+        : positionsNeedingManualVotes.value.every((position) => {
+            const limit = votesAllowedByPosition.value.get(position.id) ?? 1;
+            const detectedCount = getDetectedVotesForPosition(position.id).length;
+            const manualCount = getManualSelectionsForPosition(position.id).length;
+            const missingSlots = Math.max(0, limit - detectedCount - manualCount);
+            if (missingSlots === 0) return true;
+            const reasonCount = getManualReasonCountForPosition(position.id);
+            return reasonCount >= missingSlots;
+        })
 ));
 
 const manualOptionsForPosition = (position) => {
@@ -312,12 +345,164 @@ const setManualDraftSelections = (positionId, selections) => {
     };
 };
 
+const getManualSlotCountForPosition = (positionId) => (
+    Math.max(1, getManualLimitForPosition(positionId))
+);
+
+const normalizeSlotArray = (arr, slotCount) => {
+    const normalized = [];
+    for (let i = 0; i < slotCount; i += 1) {
+        const value = Array.isArray(arr) ? arr[i] : null;
+        const numeric = Number(value);
+        normalized.push(Number.isFinite(numeric) ? numeric : null);
+    }
+    return normalized;
+};
+
+const normalizeReasonSlotArray = (arr, slotCount) => {
+    const normalized = [];
+    for (let i = 0; i < slotCount; i += 1) {
+        const value = Array.isArray(arr) ? arr[i] : '';
+        normalized.push(typeof value === 'string' ? value : '');
+    }
+    return normalized;
+};
+
+const getManualReasonSlotsForPosition = (positionId) => {
+    if (!isMultiSeatPosition(positionId)) return [];
+    const slotCount = getManualSlotCountForPosition(positionId);
+    return normalizeReasonSlotArray(manualReasonByPosition.value?.[positionId], slotCount);
+};
+
+const getManualReasonDraftSlotsForPosition = (positionId) => {
+    if (!isMultiSeatPosition(positionId)) return [];
+    const slotCount = getManualSlotCountForPosition(positionId);
+    if (Object.prototype.hasOwnProperty.call(manualReasonDraftByPosition.value, positionId)) {
+        return normalizeReasonSlotArray(manualReasonDraftByPosition.value?.[positionId], slotCount);
+    }
+    return getManualReasonSlotsForPosition(positionId);
+};
+
+const hasManualReasonDraftSlotsForPosition = (positionId) => (
+    Object.prototype.hasOwnProperty.call(manualReasonDraftByPosition.value, positionId)
+);
+
+const getManualReasonCountForPosition = (positionId) => {
+    if (isMultiSeatPosition(positionId)) {
+        const slotCount = getManualSlotCountForPosition(positionId);
+        const selections = normalizeSlotArray(manualSelections.value?.[positionId], slotCount);
+        const reasons = getManualReasonSlotsForPosition(positionId);
+        return reasons.filter((reason, idx) => Boolean(reason) && !selections[idx]).length;
+    }
+    return getManualReasonForPosition(positionId) ? 1 : 0;
+};
+
+const setManualReasonSlotsForPosition = (positionId, slots, isDraft = false) => {
+    const nextSlots = Array.isArray(slots) ? slots.map((reason) => (typeof reason === 'string' ? reason : '')) : [];
+    if (isDraft) {
+        manualReasonDraftByPosition.value = {
+            ...manualReasonDraftByPosition.value,
+            [positionId]: nextSlots,
+        };
+        return;
+    }
+
+    if (nextSlots.some((reason) => Boolean(reason))) {
+        manualReasonByPosition.value = {
+            ...manualReasonByPosition.value,
+            [positionId]: nextSlots,
+        };
+    } else {
+        const next = { ...manualReasonByPosition.value };
+        delete next[positionId];
+        manualReasonByPosition.value = next;
+    }
+};
+
+const setManualReasonSlotForPosition = (positionId, slotIndex, reason, isDraft = false) => {
+    const slotCount = getManualSlotCountForPosition(positionId);
+    const current = isDraft
+        ? manualReasonDraftByPosition.value?.[positionId]
+        : manualReasonByPosition.value?.[positionId];
+    const nextSlots = normalizeReasonSlotArray(current, slotCount);
+    nextSlots[slotIndex] = reason;
+    setManualReasonSlotsForPosition(positionId, nextSlots, isDraft);
+};
+
+const clearManualReasonSlotForPosition = (positionId, slotIndex, isDraft = false) => {
+    setManualReasonSlotForPosition(positionId, slotIndex, '', isDraft);
+};
+
+const hasManualReasonDraftForPosition = (positionId) => (
+    isMultiSeatPosition(positionId)
+        ? getManualReasonDraftSlotsForPosition(positionId).some((reason) => Boolean(reason))
+        : Object.prototype.hasOwnProperty.call(manualReasonDraftByPosition.value, positionId)
+);
+
+const getManualReasonDraftForPosition = (positionId) => (
+    isMultiSeatPosition(positionId)
+        ? ''
+        : (hasManualReasonDraftForPosition(positionId)
+            ? (manualReasonDraftByPosition.value?.[positionId] ?? '')
+            : getManualReasonForPosition(positionId))
+);
+
+const manualSlotValueForPosition = (positionId, slotIndex) => {
+    if (isMultiSeatPosition(positionId)) {
+        const slots = getManualSlotSelectionsForPosition(positionId);
+        const slotValue = slots?.[slotIndex];
+        if (Number.isFinite(Number(slotValue)) && Number(slotValue) > 0) {
+            return String(slotValue);
+        }
+        if (hasManualReasonDraftSlotsForPosition(positionId)) {
+            const draftReasons = getManualReasonDraftSlotsForPosition(positionId);
+            return draftReasons[slotIndex]
+                ? `${manualReasonTokenPrefix}${draftReasons[slotIndex]}`
+                : '';
+        }
+        const savedReasons = getManualReasonSlotsForPosition(positionId);
+        if (savedReasons[slotIndex]) {
+            return `${manualReasonTokenPrefix}${savedReasons[slotIndex]}`;
+        }
+    } else if (hasManualReasonDraftForPosition(positionId)) {
+        const reason = getManualReasonDraftForPosition(positionId);
+        return slotIndex === 0 && reason ? `${manualReasonTokenPrefix}${reason}` : '';
+    } else if (!hasManualDraftSelectionsForPosition(positionId)) {
+        const savedReason = getManualReasonForPosition(positionId);
+        if (savedReason) return slotIndex === 0 ? `${manualReasonTokenPrefix}${savedReason}` : '';
+    }
+
+    const slots = getManualSlotSelectionsForPosition(positionId);
+    const value = slots?.[slotIndex];
+    return Number.isFinite(Number(value)) && Number(value) > 0 ? String(value) : '';
+};
+
 const normalizeIdArray = (arr) => arr
     .map((id) => Number(id))
-    .filter((id) => Number.isFinite(id))
+    .filter((id) => Number.isFinite(id) && id > 0)
     .sort((a, b) => a - b);
 
 const hasManualDraftChanges = (positionId) => {
+    if (isMultiSeatPosition(positionId)) {
+        const slotCount = getManualSlotCountForPosition(positionId);
+        const draftSlots = normalizeSlotArray(
+            Object.prototype.hasOwnProperty.call(manualDraftSelections.value, positionId)
+                ? manualDraftSelections.value?.[positionId]
+                : manualSelections.value?.[positionId],
+            slotCount
+        );
+        const savedSlots = normalizeSlotArray(manualSelections.value?.[positionId], slotCount);
+        if (draftSlots.some((value, idx) => value !== savedSlots[idx])) return true;
+
+        const draftReasons = Object.prototype.hasOwnProperty.call(manualReasonDraftByPosition.value, positionId)
+            ? normalizeReasonSlotArray(manualReasonDraftByPosition.value?.[positionId], slotCount)
+            : getManualReasonSlotsForPosition(positionId);
+        const savedReasons = getManualReasonSlotsForPosition(positionId);
+        if (draftReasons.some((reason, idx) => reason !== savedReasons[idx])) return true;
+
+        return false;
+    }
+
     const draft = normalizeIdArray(getManualDraftSelectionsForPosition(positionId));
     const saved = normalizeIdArray(getManualSelectionsForPosition(positionId));
     if (draft.length !== saved.length) return true;
@@ -331,22 +516,40 @@ const hasManualDraftChanges = (positionId) => {
 };
 
 const saveManualSelection = (positionId) => {
-    const draftReason = hasManualReasonDraftForPosition(positionId)
-        ? getManualReasonDraftForPosition(positionId)
-        : '';
-    if (draftReason) {
-        setManualReasonForPosition(positionId, draftReason);
+    if (isMultiSeatPosition(positionId)) {
+        const slotCount = getManualSlotCountForPosition(positionId);
+        const selections = normalizeSlotArray(getManualSlotSelectionsForPosition(positionId), slotCount);
+        const reasons = normalizeReasonSlotArray(getManualReasonDraftSlotsForPosition(positionId), slotCount);
+        for (let i = 0; i < slotCount; i += 1) {
+            if (selections[i]) {
+                reasons[i] = '';
+            } else if (reasons[i]) {
+                selections[i] = null;
+            }
+        }
         manualSelections.value = {
             ...manualSelections.value,
-            [positionId]: [],
+            [positionId]: selections,
         };
+        setManualReasonSlotsForPosition(positionId, reasons, false);
     } else {
-        const draft = normalizeIdArray(getManualDraftSelectionsForPosition(positionId));
-        manualSelections.value = {
-            ...manualSelections.value,
-            [positionId]: draft,
-        };
-        clearManualReasonForPosition(positionId);
+        const draftReason = hasManualReasonDraftForPosition(positionId)
+            ? getManualReasonDraftForPosition(positionId)
+            : '';
+        if (draftReason) {
+            setManualReasonForPosition(positionId, draftReason);
+            manualSelections.value = {
+                ...manualSelections.value,
+                [positionId]: [],
+            };
+        } else {
+            const draft = normalizeIdArray(getManualDraftSelectionsForPosition(positionId));
+            manualSelections.value = {
+                ...manualSelections.value,
+                [positionId]: draft,
+            };
+            clearManualReasonForPosition(positionId);
+        }
     }
 
     clearManualReasonDraftForPosition(positionId);
@@ -357,6 +560,9 @@ const saveManualSelection = (positionId) => {
 };
 
 const manualDecisionValueForPosition = (positionId) => {
+    if (isMultiSeatPosition(positionId)) {
+        return getManualDraftSelectionsForPosition(positionId)[0] ?? '';
+    }
     if (hasManualReasonDraftForPosition(positionId)) {
         const reasonDraft = getManualReasonDraftForPosition(positionId);
         return reasonDraft ? `${manualReasonTokenPrefix}${reasonDraft}` : '';
@@ -372,6 +578,9 @@ const manualDecisionValueForPosition = (positionId) => {
 };
 
 const manualDecisionValuesForPosition = (positionId) => {
+    if (isMultiSeatPosition(positionId)) {
+        return getManualDraftSelectionsForPosition(positionId).map((id) => String(id));
+    }
     if (hasManualReasonDraftForPosition(positionId)) {
         const reasonDraft = getManualReasonDraftForPosition(positionId);
         return reasonDraft ? [`${manualReasonTokenPrefix}${reasonDraft}`] : [];
@@ -403,7 +612,9 @@ const handleManualDecisionChange = (positionId, event) => {
     if (selected.startsWith(manualReasonTokenPrefix)) {
         const reason = selected.slice(manualReasonTokenPrefix.length);
         setManualReasonDraftForPosition(positionId, reason);
-        clearManualDraftSelectionsForPosition(positionId);
+        if (!isMultiSeatPosition(positionId)) {
+            clearManualDraftSelectionsForPosition(positionId);
+        }
         return;
     }
 
@@ -420,7 +631,6 @@ const handleManualDecisionMultiChange = (positionId, event) => {
     if (reasonValue) {
         const reason = reasonValue.slice(manualReasonTokenPrefix.length);
         setManualReasonDraftForPosition(positionId, reason);
-        clearManualDraftSelectionsForPosition(positionId);
         return;
     }
 
@@ -430,6 +640,69 @@ const handleManualDecisionMultiChange = (positionId, event) => {
         .filter((id) => Number.isFinite(id));
     const trimmed = limit > 0 ? selected.slice(0, limit) : [];
     setManualDraftSelections(positionId, trimmed);
+};
+
+const handleManualSlotChange = (positionId, slotIndex, event) => {
+    const selected = String(event?.target?.value ?? '');
+    const slotCount = getManualSlotCountForPosition(positionId);
+    const slots = getManualSlotSelectionsForPosition(positionId);
+    while (slots.length < slotCount) slots.push(null);
+
+    if (!selected) {
+        slots[slotIndex] = null;
+        setManualDraftSelections(positionId, slots);
+        clearManualReasonDraftForPosition(positionId);
+        return;
+    }
+
+    if (selected.startsWith(manualReasonTokenPrefix)) {
+        const reason = selected.slice(manualReasonTokenPrefix.length);
+        if (reason === 'overvote' && slotIndex === 0 && isMultiSeatPosition(positionId)) {
+            const slotCount = getManualSlotCountForPosition(positionId);
+            setManualReasonSlotsForPosition(positionId, Array(slotCount).fill(reason), true);
+            setManualDraftSelections(positionId, Array(slotCount).fill(null));
+        } else {
+            setManualReasonSlotForPosition(positionId, slotIndex, reason, true);
+            slots[slotIndex] = null;
+            setManualDraftSelections(positionId, slots);
+        }
+        return;
+    }
+
+    clearManualReasonSlotForPosition(positionId, slotIndex, true);
+    const numeric = Number(selected);
+    if (!Number.isFinite(numeric)) return;
+
+    for (let i = 0; i < slots.length; i += 1) {
+        if (Number(slots[i]) === numeric) slots[i] = null;
+    }
+
+    slots[slotIndex] = numeric;
+    setManualDraftSelections(positionId, slots);
+};
+
+const saveManualSlotSelection = (positionId) => {
+    const slotCount = getManualSlotCountForPosition(positionId);
+    const slots = normalizeSlotArray(getManualSlotSelectionsForPosition(positionId), slotCount);
+    const reasons = normalizeReasonSlotArray(getManualReasonDraftSlotsForPosition(positionId), slotCount);
+    for (let i = 0; i < slotCount; i += 1) {
+        if (slots[i]) {
+            reasons[i] = '';
+        } else if (reasons[i]) {
+            slots[i] = null;
+        }
+    }
+    manualSelections.value = {
+        ...manualSelections.value,
+        [positionId]: slots,
+    };
+    setManualReasonSlotsForPosition(positionId, reasons, false);
+    clearManualReasonDraftForPosition(positionId);
+
+    const nextDraft = { ...manualDraftSelections.value };
+    delete nextDraft[positionId];
+    manualDraftSelections.value = nextDraft;
+    showManualSaveNotice(positionId);
 };
 
 const candidateById = computed(() => {
@@ -450,17 +723,21 @@ const manualVotes = computed(() => {
     const votes = [];
     Object.entries(manualSelections.value || {}).forEach(([positionId, candidateIds]) => {
         if (!Array.isArray(candidateIds)) return;
-        candidateIds.forEach((candidateId) => {
-            const candidate = candidateById.value.get(Number(candidateId));
-            votes.push({
-                position_id: Number(positionId),
-                candidate_id: Number(candidateId),
-                candidate_name: candidate?.name ?? `Candidate ${candidateId}`,
-                candidate_party: candidate?.party ?? null,
-                confidence: null,
-                source: 'manual',
+        candidateIds
+            .map((candidateId) => Number(candidateId))
+            .filter((candidateId) => Number.isFinite(candidateId) && candidateId > 0)
+            .forEach((candidateId) => {
+                const candidate = candidateById.value.get(candidateId);
+                if (!candidate) return;
+                votes.push({
+                    position_id: Number(positionId),
+                    candidate_id: candidateId,
+                    candidate_name: candidate.name,
+                    candidate_party: candidate.party ?? null,
+                    confidence: null,
+                    source: 'manual',
+                });
             });
-        });
     });
     return votes;
 });
@@ -472,6 +749,18 @@ const mergedVotesForDisplay = computed(() => {
     if (!manualVotes.value.length) return detected;
     return [...detected, ...manualVotes.value];
 });
+
+const getAllowedVotesForPosition = (positionId) => (
+    votesAllowedByPosition.value.get(Number(positionId)) ?? 1
+);
+
+const getDisplayVotesForPosition = (positionId) => (
+    mergedVotesForDisplay.value.filter((vote) => Number(vote.position_id) === Number(positionId))
+);
+
+const getMissingSlotsForPosition = (positionId) => (
+    Math.max(0, getAllowedVotesForPosition(positionId) - getDisplayVotesForPosition(positionId).length)
+);
 
 const canSubmitBallot = computed(() =>
     scanPhase.value === 'validating' &&
@@ -1993,28 +2282,34 @@ onBeforeUnmount(() => {
                         <!-- Votes grouped by position -->
                         <template v-if="mergedVotesForDisplay.length">
                             <div v-for="position in positions" :key="position.id">
-                                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">{{ position.name }}</p>
-                                <template v-if="mergedVotesForDisplay.filter(v => v.position_id === position.id).length">
-                                    <div v-for="vote in mergedVotesForDisplay.filter(v => v.position_id === position.id)"
-                                        :key="vote.candidate_id"
-                                        class="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
-                                        <div class="flex items-center gap-2">
-                                            <i class="bi bi-check-circle-fill text-emerald-600 text-base flex-shrink-0 leading-none" aria-hidden="true"></i>
-                                            <span class="font-medium text-slate-800">{{ vote.candidate_name }}</span>
-                                            <span v-if="vote.candidate_party" class="text-xs text-slate-500">· {{ vote.candidate_party }}</span>
-                                            <span v-if="vote.source === 'manual'"
-                                                class="text-[0.65rem] font-semibold uppercase tracking-wide text-amber-700">Manual</span>
+                                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">{{ position.name }}</p>
+                                <div class="space-y-2">
+                                    <template v-if="getDisplayVotesForPosition(position.id).length">
+                                        <div v-for="vote in getDisplayVotesForPosition(position.id)"
+                                            :key="vote.candidate_id"
+                                            class="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+                                            <div class="flex items-center gap-2">
+                                                <i class="bi bi-check-circle-fill text-emerald-600 text-base flex-shrink-0 leading-none" aria-hidden="true"></i>
+                                                <span class="font-medium text-slate-800">{{ vote.candidate_name }}</span>
+                                                <span v-if="vote.candidate_party" class="text-xs text-slate-500">· {{ vote.candidate_party }}</span>
+                                                <span v-if="vote.source === 'manual'"
+                                                    class="text-[0.65rem] font-semibold uppercase tracking-wide text-amber-700">Manual</span>
+                                            </div>
+                                            <span v-if="Number.isFinite(Number(vote.confidence))"
+                                                class="text-xs font-medium px-1.5 py-0.5 rounded-full"
+                                                :class="Number(vote.confidence) >= 0.7 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">
+                                                {{ (Number(vote.confidence) * 100).toFixed(0) }}%
+                                            </span>
                                         </div>
-                                        <span v-if="Number.isFinite(Number(vote.confidence))"
-                                            class="text-xs font-medium px-1.5 py-0.5 rounded-full"
-                                            :class="Number(vote.confidence) >= 0.7 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">
-                                            {{ (Number(vote.confidence) * 100).toFixed(0) }}%
-                                        </span>
-                                    </div>
-                                </template>
-                                <div v-else class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 flex items-center gap-2">
-                                    <i class="bi bi-x-circle text-base flex-shrink-0 leading-none" aria-hidden="true"></i>
-                                    No vote detected
+                                    </template>
+                                    <template v-if="getMissingSlotsForPosition(position.id) > 0">
+                                        <div v-for="index in getMissingSlotsForPosition(position.id)"
+                                            :key="`missing-${position.id}-${index}`"
+                                            class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 flex items-center gap-2">
+                                            <i class="bi bi-x-circle text-base flex-shrink-0 leading-none" aria-hidden="true"></i>
+                                            No vote detected
+                                        </div>
+                                    </template>
                                 </div>
 
                                 <div v-if="positionNeedsManualVote(position) || hasSavedManualDecision(position.id)"
@@ -2026,11 +2321,23 @@ onBeforeUnmount(() => {
                                         <p class="text-xs font-semibold text-amber-900">Manual selection</p>
                                         <div class="flex items-center gap-2 text-[0.7rem]">
                                             <span class="text-amber-700">
-                                                {{ getManualReasonForPosition(position.id)
-                                                    ? `Reason: ${manualReasonLabel(getManualReasonForPosition(position.id))}`
-                                                    : (getManualSelectionsForPosition(position.id).length > 0
-                                                        ? 'Selection saved'
-                                                        : `Needs ${manualRemainingForPosition(position.id)} more`
+                                                {{ manualRemainingAfterReasons(position.id) > 0
+                                                    ? `Needs ${manualRemainingAfterReasons(position.id)} more`
+                                                    : (isMultiSeatPosition(position.id)
+                                                        ? (getManualReasonCountForPosition(position.id) > 0
+                                                            ? `Reasons saved (${getManualReasonCountForPosition(position.id)})`
+                                                            : (getManualSelectionsForPosition(position.id).length > 0
+                                                                ? 'Selection saved'
+                                                                : 'Selection saved'
+                                                            )
+                                                        )
+                                                        : (getManualReasonForPosition(position.id)
+                                                            ? `Reason: ${manualReasonLabel(getManualReasonForPosition(position.id))}`
+                                                            : (getManualSelectionsForPosition(position.id).length > 0
+                                                                ? 'Selection saved'
+                                                                : 'Selection saved'
+                                                            )
+                                                        )
                                                     )
                                                 }}
                                             </span>
@@ -2054,6 +2361,33 @@ onBeforeUnmount(() => {
                                                 {{ option.label }}
                                             </option>
                                         </select>
+                                        <div v-else-if="isMobileViewport()" class="grid gap-2">
+                                            <div v-for="slotIndex in getManualSlotCountForPosition(position.id)" :key="`slot-${position.id}-${slotIndex}`" class="space-y-1">
+                                                <select
+                                                    class="w-full rounded-lg border-slate-300 text-sm focus:border-amber-500 focus:ring-amber-500"
+                                                    :value="manualSlotValueForPosition(position.id, slotIndex - 1)"
+                                                    @change="handleManualSlotChange(position.id, slotIndex - 1, $event)">
+                                                    <option value="" disabled>Select candidate or reason</option>
+                                                    <option v-for="candidate in manualOptionsForPosition(position)" :key="`manual-${position.id}-${candidate.id}-slot-${slotIndex}`" :value="candidate.id">
+                                                        {{ candidate.name }}
+                                                    </option>
+                                                    <option v-for="option in manualReasonOptions"
+                                                        :key="`manual-reason-${position.id}-${option.value}-slot-${slotIndex}`"
+                                                        :value="`${manualReasonTokenPrefix}${option.value}`"
+                                                        :disabled="option.value === 'overvote' && shouldDisableOvervoteForPosition(position.id)">
+                                                        {{ option.label }}
+                                                    </option>
+                                                </select>
+                                                <div class="flex items-center justify-end">
+                                                    <button type="button"
+                                                        class="rounded-lg border border-amber-300 bg-amber-100 px-3 py-1.5 text-[0.7rem] font-semibold text-amber-800 hover:bg-amber-200"
+                                                        @click="saveManualSlotSelection(position.id)">
+                                                        Save slot
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <p class="text-[0.7rem] text-slate-500">Tap each slot to select multiple.</p>
+                                        </div>
                                         <select
                                             v-else
                                             multiple
@@ -2063,18 +2397,16 @@ onBeforeUnmount(() => {
                                             <option v-for="candidate in manualOptionsForPosition(position)" :key="`manual-${position.id}-${candidate.id}`" :value="candidate.id">
                                                 {{ candidate.name }}
                                             </option>
-                                            <option v-for="option in manualReasonOptions" :key="`manual-reason-${position.id}-${option.value}`" :value="`${manualReasonTokenPrefix}${option.value}`">
-                                                {{ option.label }}
-                                            </option>
                                         </select>
-                                        <p v-if="isMultiSeatPosition(position.id)" class="text-[0.7rem] text-slate-500">
+                                        <p v-if="isMultiSeatPosition(position.id) && !isMobileViewport()" class="text-[0.7rem] text-slate-500">
                                             Hold Ctrl (Windows) or Command (Mac) to select multiple.
                                         </p>
                                         <div class="flex items-center justify-end gap-2">
                                             <span v-if="getManualSaveNoticeForPosition(position.id)" class="text-xs font-semibold text-emerald-600">
                                                 {{ getManualSaveNoticeForPosition(position.id) }}
                                             </span>
-                                            <button type="button"
+                                            <button v-if="!(isMultiSeatPosition(position.id) && isMobileViewport())"
+                                                type="button"
                                                 class="rounded-lg border border-amber-300 bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-50"
                                                 :disabled="!hasManualDraftChanges(position.id)"
                                                 @click="saveManualSelection(position.id)">
